@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/yarma/tsession/internal/render"
 )
 
 func Browse(args []string) error {
@@ -49,7 +51,6 @@ func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
 		"--prompt=session> ",
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
 		"--bind=ctrl-y:execute-silent(echo -n {2} | pbcopy)+abort",
-		"--bind=start:reload(" + reloadCmd + ")",
 	}
 	if query != "" {
 		fzfArgs = append(fzfArgs, "--query="+query)
@@ -65,7 +66,23 @@ func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
 
 	cmd := exec.Command("fzf", fzfArgs...)
 	cmd.Stderr = os.Stderr
-	cmd.Stdin = nil
+
+	// Feed the initial session list on stdin so fzf renders immediately
+	// — no fork+exec of `tsession list` between popup open and first paint.
+	// Refresh keeps working via ctrl-r and the popup-mode curl loop.
+	stdin, err := initialListBytes(maxAge)
+	if err != nil {
+		// Non-fatal: fall back to empty stdin + reload-on-start so the
+		// picker still works even if the cache + live load both failed.
+		fmt.Fprintln(os.Stderr, "warning: initial list load failed, using reload-on-start:", err)
+		fzfArgs = append(fzfArgs, "--bind=start:reload("+reloadCmd+")")
+		cmd = exec.Command("fzf", fzfArgs...)
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = nil
+	} else {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -75,6 +92,22 @@ func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// initialListBytes renders the fzf-formatted session list in-process,
+// reusing the same cache-first path as `tsession list --fzf`.
+func initialListBytes(maxAge time.Duration) (string, error) {
+	merged, err := loadAll(maxAge, false)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now()
+	var b strings.Builder
+	for _, s := range merged {
+		b.WriteString(render.FormatLine(s, now, false))
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
 }
 
 func asExit(err error, target **exec.ExitError) bool {

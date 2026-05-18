@@ -19,6 +19,12 @@ func List(args []string) error {
 	noCache := fs.Bool("no-cache", false, "ignore the watch cache and load live")
 	_ = fs.Parse(args)
 
+	if !*noCache {
+		if err := EnsureWatcherRunning(*fzfMode); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: auto-start watcher failed:", err)
+		}
+	}
+
 	merged, err := loadAll(*maxAge, *noCache)
 	if err != nil {
 		return err

@@ -79,6 +79,50 @@ func TestMerge_SortOrder_TmuxFirstThenStatePriority(t *testing.T) {
 	_ = filepath.Base
 }
 
+func TestMerge_SortOrder_Buckets(t *testing.T) {
+	// Three buckets, in order:
+	//   1) has tmux
+	//   2) active (Waiting/Working/ActiveIdle) without tmux
+	//   3) the rest
+	// Within each bucket, higher state priority wins, then recency.
+	now := time.Now()
+	store := []Session{
+		{ID: "tmux-idle-old",   CWD: "/x/t1",  UpdatedAt: now.Add(-1 * time.Hour)},
+		{ID: "no-tmux-working", CWD: "/x/nw",  UpdatedAt: now.Add(-2 * time.Minute)},
+		{ID: "no-tmux-waiting", CWD: "/x/na",  UpdatedAt: now.Add(-5 * time.Minute)},
+		{ID: "no-tmux-active",  CWD: "/x/ai",  UpdatedAt: now.Add(-3 * time.Minute)},
+		{ID: "no-tmux-recent",  CWD: "/x/nr",  UpdatedAt: now.Add(-1 * time.Minute)},
+		{ID: "no-tmux-exited",  CWD: "/x/ne",  UpdatedAt: now.Add(-10 * time.Minute)},
+	}
+	stateDirs := []StateDirInfo{
+		{ID: "tmux-idle-old",   State: StateInactiveIdle},
+		{ID: "no-tmux-working", State: StateWorking},
+		{ID: "no-tmux-waiting", State: StateWaiting},
+		{ID: "no-tmux-active",  State: StateActiveIdle},
+		{ID: "no-tmux-recent",  State: StateInactiveIdle},
+		{ID: "no-tmux-exited",  State: StateExited},
+	}
+	tmuxs := []tmux.Session{
+		{Name: "t1", Path: "/x/t1"},
+	}
+
+	got := Merge(store, stateDirs, tmuxs)
+
+	want := []string{
+		"tmux-idle-old",   // bucket 0: only tmux session
+		"no-tmux-waiting", // bucket 1: Waiting (priority 4)
+		"no-tmux-working", // bucket 1: Working (priority 3)
+		"no-tmux-active",  // bucket 1: ActiveIdle (priority 2)
+		"no-tmux-recent",  // bucket 2: idle, newer
+		"no-tmux-exited",  // bucket 2: exited, older
+	}
+	for i, w := range want {
+		if got[i].ID != w {
+			t.Errorf("pos %d: want %s, got %s (full=%v)", i, w, got[i].ID, idsOf(got))
+		}
+	}
+}
+
 func idsOf(ss []Session) []string {
 	out := make([]string, len(ss))
 	for i, s := range ss {

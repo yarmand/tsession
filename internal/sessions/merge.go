@@ -37,18 +37,33 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
-		ai, bi := a.TmuxName != "", b.TmuxName != ""
-		if ai != bi {
-			return ai
+		if ba, bb := bucket(a), bucket(b); ba != bb {
+			return ba < bb
 		}
-		if ai && bi {
-			if pa, pb := statePriority(a.State), statePriority(b.State); pa != pb {
-				return pa > pb
-			}
+		if pa, pb := statePriority(a.State), statePriority(b.State); pa != pb {
+			return pa > pb
 		}
 		return a.UpdatedAt.After(b.UpdatedAt)
 	})
 	return out
+}
+
+// bucket returns the primary sort group for a session (lower is earlier):
+//   0 — has an attached tmux session
+//   1 — is "active" (Waiting / Working / ActiveIdle), regardless of tmux
+//   2 — everything else (inactive idle / exited / unknown)
+func bucket(s Session) int {
+	if s.TmuxName != "" {
+		return 0
+	}
+	if isActive(s.State) {
+		return 1
+	}
+	return 2
+}
+
+func isActive(s State) bool {
+	return s == StateWaiting || s == StateWorking || s == StateActiveIdle
 }
 
 func statePriority(s State) int {

@@ -124,7 +124,11 @@ func loadAllLive(maxAge time.Duration) ([]sessions.Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load session store: %w", err)
 	}
-	sd, err := sessions.LoadAllStateDirs(stateRoot)
+	ids := make([]string, len(store))
+	for i, s := range store {
+		ids[i] = s.ID
+	}
+	sd, err := sessions.LoadStateDirsForIDs(stateRoot, ids)
 	if err != nil {
 		return nil, fmt.Errorf("load state dirs: %w", err)
 	}

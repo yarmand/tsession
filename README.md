@@ -30,9 +30,10 @@ tsession stop-watch           # stop the running watcher
 
 ## Background cache (`watch`)
 
-Loading the live session list takes ~1s on a busy machine because `lsof` is
-called for every session-state directory. To make `list`/`browse`/`popup`
-near-instant, run a background watcher that maintains a cache file:
+A live load typically completes in well under 300 ms (≈200 ms with
+~50 recent sessions), so `list`/`browse`/`popup` are snappy without any
+extra setup. For sub-10 ms reads — e.g. a tmux popup that re-renders on
+every keystroke — run a background watcher that maintains a cache file:
 
 ```bash
 tsession watch --daemon                 # interval=10s, logs to ~/.tsession/watch.log

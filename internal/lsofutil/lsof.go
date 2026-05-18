@@ -36,11 +36,12 @@ func LockedSet(paths []string) (map[string]bool, error) {
 	cmd.Stdout = &buf
 	cmd.Stderr = nil
 	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			// No matching open files; lsof exits 1.
-			return out, nil
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+			return nil, err
 		}
-		return nil, err
+		// lsof exits 1 when *any* of the input paths is not currently
+		// open by some process — even if other paths matched. Fall
+		// through and parse whatever it printed.
 	}
 	want := make(map[string]struct{}, len(paths))
 	for _, p := range paths {

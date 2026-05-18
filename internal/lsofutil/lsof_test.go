@@ -1,6 +1,9 @@
 package lsofutil
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
@@ -42,18 +45,49 @@ func TestLockedSet_EmptyInputNoFork(t *testing.T) {
 	}
 }
 
-func TestLockedSet_OnlyReturnsRequestedPaths(t *testing.T) {
-	// Build the result map manually from parseLockedNames + a synthetic
-	// "wanted" set to verify the filter logic without invoking lsof.
-	parsed := parseLockedNames("p1\nn/a\nn/extra\np2\nn/b\n")
-	want := map[string]struct{}{"/a": {}, "/b": {}, "/c": {}}
-	out := map[string]bool{}
-	for _, p := range parsed {
-		if _, ok := want[p]; ok {
-			out[p] = true
-		}
+func TestLockedSet_RealLsofIntegration(t *testing.T) {
+	// On macOS lsof exits 1 if *any* argument file isn't open, even when
+	// other arguments matched. Make sure we still surface the matches.
+	// We use /dev/null (a file that always exists) and the lsof binary
+	// itself (almost certainly NOT open by anything), guaranteeing the
+	// "mixed match + non-match" condition.
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("lsof not on PATH")
 	}
-	if !reflect.DeepEqual(out, map[string]bool{"/a": true, "/b": true}) {
-		t.Errorf("got %v", out)
+	// Find an always-open path: lsof on `os.Executable()` won't help
+	// because the test binary isn't held open via fd in the usual sense.
+	// Instead, open a temp file ourselves and pass it.
+	tmp, err := os.CreateTemp("", "lockedset-*.tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close() // keep it open through the test
+
+	// macOS /var/folders is a symlink to /private/var/folders; lsof
+	// reports the resolved path, so normalize both sides for the lookup.
+	openPath, err := filepath.EvalSymlinks(tmp.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bogus := filepath.Join(t.TempDir(), "definitely-not-open.txt")
+	if err := os.WriteFile(bogus, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LockedSet([]string{openPath, bogus})
+	if err != nil {
+		t.Fatalf("LockedSet errored despite partial match: %v", err)
+	}
+	if !got[openPath] {
+		t.Errorf("expected %s to be reported as locked, got %v", openPath, got)
+	}
+	if got[bogus] {
+		t.Errorf("did not expect %s to be reported as locked", bogus)
 	}
 }
+
+// (parseLockedNames-only filter test removed; covered by TestParseLockedNames
+// and the integration test above.)
+

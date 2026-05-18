@@ -24,7 +24,26 @@ tsession list                 # print recent sessions to stdout
 tsession browse [query]       # fzf picker in current terminal
 tsession popup                # fzf picker designed for tmux popup
 tsession resume <session-id>  # switch tmux or fall back to `copilot --resume`
+tsession watch [--daemon]     # refresh ~/.tsession/cache.json every --interval (default 10s)
+tsession stop-watch           # stop the running watcher
 ```
+
+## Background cache (`watch`)
+
+Loading the live session list takes ~1s on a busy machine because `lsof` is
+called for every session-state directory. To make `list`/`browse`/`popup`
+near-instant, run a background watcher that maintains a cache file:
+
+```bash
+tsession watch --daemon                 # interval=10s, logs to ~/.tsession/watch.log
+tsession watch --daemon --interval=5s   # custom interval
+tsession stop-watch                     # stop it
+```
+
+When the cache file at `~/.tsession/cache.json` is within `2 × interval` of
+now, `list`/`browse`/`popup` use it directly. Otherwise they fall back to a
+live load, so a crashed or stale watcher never silently lies. Pass
+`--no-cache` to `list` to force a live load.
 
 ## tmux popup keybind
 

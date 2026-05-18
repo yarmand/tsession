@@ -25,6 +25,10 @@ func main() {
 		err = cmd.Popup(args)
 	case "resume":
 		err = cmd.Resume(args)
+	case "watch":
+		err = cmd.Watch(args)
+	case "stop-watch":
+		err = cmd.StopWatch(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -47,5 +51,7 @@ Usage:
   tsession browse [query]      fzf picker (no popup)
   tsession popup               fzf picker designed for tmux popup
   tsession resume <session-id> Switch tmux to session, or copilot --resume
+  tsession watch [--daemon]    Refresh ~/.tsession/cache.json every --interval (default 10s)
+  tsession stop-watch          Stop a running watch process
   tsession -h                  Show this help`)
 }

@@ -4,12 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/yarma/tsession/internal/cache"
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
-	"github.com/yarma/tsession/internal/tmux"
 )
 
 func List(args []string) error {
@@ -17,9 +16,10 @@ func List(args []string) error {
 	maxAge := fs.Duration("max-age", 14*24*time.Hour, "ignore sessions older than this")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	fzfMode := fs.Bool("fzf", false, "emit tab-delimited lines for fzf consumption")
+	noCache := fs.Bool("no-cache", false, "ignore the watch cache and load live")
 	_ = fs.Parse(args)
 
-	merged, err := loadAll(*maxAge)
+	merged, err := loadAll(*maxAge, *noCache)
 	if err != nil {
 		return err
 	}
@@ -40,25 +40,34 @@ func List(args []string) error {
 	return nil
 }
 
-func loadAll(maxAge time.Duration) ([]sessions.Session, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
+// loadAll returns the merged session list. When a watcher cache exists and is
+// fresh (within 2*interval of now), it returns the cached snapshot — filtered
+// to the caller's maxAge. Otherwise it falls back to a live load.
+func loadAll(maxAge time.Duration, noCache bool) ([]sessions.Session, error) {
+	if !noCache {
+		if f, err := cache.Read(); err == nil {
+			tol := 2 * f.Interval
+			if tol < 5*time.Second {
+				tol = 5 * time.Second
+			}
+			if f.Fresh(time.Now(), tol) {
+				return filterByAge(f.Sessions, maxAge), nil
+			}
+		} else if !cache.IsNotExist(err) {
+			fmt.Fprintln(os.Stderr, "warning: cache read failed, falling back to live:", err)
+		}
 	}
-	dbPath := filepath.Join(home, ".copilot", "session-store.db")
-	stateRoot := filepath.Join(home, ".copilot", "session-state")
+	return loadAllLive(maxAge)
+}
 
-	store, err := sessions.LoadRecent(dbPath, maxAge)
-	if err != nil {
-		return nil, fmt.Errorf("load session store: %w", err)
+func filterByAge(in []sessions.Session, maxAge time.Duration) []sessions.Session {
+	cutoff := time.Now().Add(-maxAge)
+	out := in[:0:0]
+	for _, s := range in {
+		if !s.UpdatedAt.IsZero() && s.UpdatedAt.Before(cutoff) {
+			continue
+		}
+		out = append(out, s)
 	}
-	sd, err := sessions.LoadAllStateDirs(stateRoot)
-	if err != nil {
-		return nil, fmt.Errorf("load state dirs: %w", err)
-	}
-	tx, err := tmux.ListSessions()
-	if err != nil {
-		return nil, fmt.Errorf("list tmux: %w", err)
-	}
-	return sessions.Merge(store, sd, tx), nil
+	return out
 }

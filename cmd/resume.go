@@ -17,7 +17,7 @@ func Resume(args []string) error {
 	}
 	id := args[0]
 
-	merged, err := loadAll(14 * 24 * time.Hour)
+	merged, err := loadAll(14*24*time.Hour, false)
 	if err != nil {
 		return err
 	}

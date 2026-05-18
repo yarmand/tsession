@@ -34,7 +34,7 @@ func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	reloadCmd := fmt.Sprintf("%s list --fzf --max-age=%s", self, maxAge)
+	reloadCmd := fmt.Sprintf("%s list --fzf --max-age=%s", shellQuote(self), maxAge)
 
 	fzfArgs := []string{
 		"--delimiter=\t",
@@ -83,4 +83,10 @@ func asExit(err error, target **exec.ExitError) bool {
 		return true
 	}
 	return false
+}
+
+// shellQuote wraps s in single quotes, escaping any embedded single quotes,
+// so that it is safe to embed in shell commands executed by fzf bindings.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

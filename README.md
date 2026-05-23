@@ -86,6 +86,7 @@ for the full session list.
 |-------|----------|------------------------------------------------------------------------|
 | ●     | working  | last event was `tool.execution_start` (non-prompting tool) / `agent.processing` |
 | ◐     | question | last event was `tool.execution_start` for `ask_user`/`ask_question`, or a permission request |
+| ✓     | done     | session just transitioned from `working` to `active`; cleared the first time you switch to its tmux pane |
 | ○     | active   | `session.db` held open by a live copilot process                       |
 | ·     | idle     | no live process, no shutdown event                                     |
 | ·     | exited   | `session.shutdown` event in `events.jsonl`                             |

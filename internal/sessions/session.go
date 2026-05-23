@@ -9,6 +9,7 @@ const (
 	StateExited
 	StateInactiveIdle
 	StateActiveIdle
+	StateDone
 	StateWorking
 	StateWaiting
 )
@@ -21,6 +22,8 @@ func (s State) String() string {
 		return "idle"
 	case StateActiveIdle:
 		return "active"
+	case StateDone:
+		return "done"
 	case StateWorking:
 		return "working"
 	case StateWaiting:

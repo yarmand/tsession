@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/yarma/tsession/internal/donestate"
 	"github.com/yarma/tsession/internal/sessions"
 	"github.com/yarma/tsession/internal/tmux"
 )
@@ -34,7 +35,11 @@ func Resume(args []string) error {
 		if target == "" {
 			target = match.TmuxName
 		}
-		return tmux.SwitchClient(target)
+		if err := tmux.SwitchClient(target); err != nil {
+			return err
+		}
+		_ = donestate.Clear(id)
+		return nil
 	}
 
 	if _, err := exec.LookPath("copilot"); err != nil {

@@ -3,7 +3,9 @@ package sessions
 import (
 	"path/filepath"
 	"sort"
+	"time"
 
+	"github.com/yarma/tsession/internal/donestate"
 	"github.com/yarma/tsession/internal/tmux"
 )
 
@@ -21,6 +23,13 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 		tmuxByBase[t.Name] = t.Name
 	}
 
+	rt, _ := donestate.Load()
+	if rt == nil {
+		rt = &donestate.File{Entries: map[string]donestate.Entry{}}
+	}
+	now := time.Now()
+	dirty := false
+
 	out := make([]Session, 0, len(store))
 	for _, s := range store {
 		if sd, ok := stateByID[s.ID]; ok {
@@ -35,7 +44,39 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 		} else if name, ok := tmuxByBase[filepath.Base(s.CWD)]; ok && s.CWD != "" {
 			s.TmuxName = name
 		}
+
+		raw := s.State
+		entry := rt.Entries[s.ID]
+		prev := entry.LastState
+		hadDone := !entry.DoneSince.IsZero()
+		switch {
+		case raw == StateActiveIdle || raw == StateInactiveIdle:
+			if prev == StateWorking.String() {
+				entry.DoneSince = now
+				hadDone = true
+			}
+			if hadDone {
+				s.State = StateDone
+			}
+		default:
+			// Any other state (working, question, exited, unknown)
+			// clears a pending "done" marker.
+			if hadDone {
+				entry.DoneSince = time.Time{}
+				hadDone = false
+			}
+		}
+		if entry.LastState != raw.String() || entry.DoneSince != rt.Entries[s.ID].DoneSince {
+			entry.LastState = raw.String()
+			rt.Entries[s.ID] = entry
+			dirty = true
+		}
+
 		out = append(out, s)
+	}
+
+	if dirty {
+		_ = donestate.Save(rt)
 	}
 
 	sort.SliceStable(out, func(i, j int) bool {
@@ -70,14 +111,16 @@ func bucket(s Session) int {
 }
 
 func isActive(s State) bool {
-	return s == StateWaiting || s == StateWorking || s == StateActiveIdle
+	return s == StateWaiting || s == StateWorking || s == StateActiveIdle || s == StateDone
 }
 
 func statePriority(s State) int {
 	switch s {
 	case StateWaiting:
-		return 4
+		return 5
 	case StateWorking:
+		return 4
+	case StateDone:
 		return 3
 	case StateActiveIdle:
 		return 2

@@ -147,3 +147,62 @@ if got[0].ID != "idle-no-tmux" || got[1].ID != "exited-tmux" {
 t.Errorf("want exited last, got %v", idsOf(got))
 }
 }
+
+func TestMerge_DoneTransitionFromWorkingToActive(t *testing.T) {
+t.Setenv("HOME", t.TempDir())
+
+store := []Session{{ID: "s1", CWD: "/x/s1", UpdatedAt: time.Now()}}
+
+// First pass: state is working.
+sd := []StateDirInfo{{ID: "s1", State: StateWorking}}
+got := Merge(store, sd, nil)
+if got[0].State != StateWorking {
+t.Fatalf("pass1: want working, got %s", got[0].State)
+}
+
+// Second pass: state transitions to ActiveIdle → expect Done.
+sd = []StateDirInfo{{ID: "s1", State: StateActiveIdle}}
+got = Merge(store, sd, nil)
+if got[0].State != StateDone {
+t.Fatalf("pass2: want done, got %s", got[0].State)
+}
+
+// Third pass: still ActiveIdle (no transition) → still Done.
+got = Merge(store, sd, nil)
+if got[0].State != StateDone {
+t.Fatalf("pass3: want done sticky, got %s", got[0].State)
+}
+
+// Fourth pass: state goes back to working → done marker cleared.
+sd = []StateDirInfo{{ID: "s1", State: StateWorking}}
+got = Merge(store, sd, nil)
+if got[0].State != StateWorking {
+t.Fatalf("pass4: want working, got %s", got[0].State)
+}
+
+// Fifth pass: back to ActiveIdle → done marker should appear again.
+sd = []StateDirInfo{{ID: "s1", State: StateActiveIdle}}
+got = Merge(store, sd, nil)
+if got[0].State != StateDone {
+t.Fatalf("pass5: want done, got %s", got[0].State)
+}
+}
+
+func TestMerge_DoneClearedWhenStateNotIdle(t *testing.T) {
+t.Setenv("HOME", t.TempDir())
+
+store := []Session{{ID: "s1", CWD: "/x/s1", UpdatedAt: time.Now()}}
+
+// Working → ActiveIdle = Done.
+Merge(store, []StateDirInfo{{ID: "s1", State: StateWorking}}, nil)
+got := Merge(store, []StateDirInfo{{ID: "s1", State: StateActiveIdle}}, nil)
+if got[0].State != StateDone {
+t.Fatalf("setup: want done, got %s", got[0].State)
+}
+
+// Now state becomes exited → done is cleared, state is exited.
+got = Merge(store, []StateDirInfo{{ID: "s1", State: StateExited}}, nil)
+if got[0].State != StateExited {
+t.Fatalf("want exited, got %s", got[0].State)
+}
+}

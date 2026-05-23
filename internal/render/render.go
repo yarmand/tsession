@@ -22,7 +22,11 @@ func FormatLineShort(s sessions.Session, now time.Time, color bool) string {
 }
 
 func formatLine(s sessions.Session, now time.Time, color, short bool) string {
-	age := FormatAge(now.Sub(s.UpdatedAt))
+	ts := s.LastEventAt
+	if ts.IsZero() {
+		ts = s.UpdatedAt
+	}
+	age := FormatAge(now.Sub(ts))
 	state := s.State.String()
 	if color {
 		state = colorize(s.State, padRight(stateGlyph(s.State)+state, 9))
@@ -86,6 +90,8 @@ func stateGlyph(s sessions.State) string {
 		return "● "
 	case sessions.StateWaiting:
 		return "◐ "
+	case sessions.StateDone:
+		return "✓ "
 	case sessions.StateActiveIdle:
 		return "○ "
 	default:
@@ -100,6 +106,8 @@ func colorize(s sessions.State, text string) string {
 		code = "32"
 	case sessions.StateWaiting:
 		code = "33"
+	case sessions.StateDone:
+		code = "35"
 	case sessions.StateActiveIdle:
 		code = "36"
 	case sessions.StateExited, sessions.StateInactiveIdle:

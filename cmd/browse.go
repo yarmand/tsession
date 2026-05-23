@@ -14,6 +14,10 @@ import (
 func Browse(args []string) error {
 	fs := flag.NewFlagSet("browse", flag.ExitOnError)
 	maxAge := fs.Duration("max-age", 14*24*time.Hour, "ignore sessions older than this")
+	active := fs.Bool("active", false, "only show sessions attached to tmux with a known, non-exited state")
+	short := fs.Bool("short", false, "compact output: state, age, repo basename, summary truncated to 30 chars")
+	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
+	watch := fs.Bool("watch", false, "auto-refresh the list every 5s and keep browsing after each selection")
 	_ = fs.Parse(args)
 	query := strings.Join(fs.Args(), " ")
 
@@ -21,22 +25,62 @@ func Browse(args []string) error {
 		return fmt.Errorf("fzf not found in PATH (brew install fzf)")
 	}
 
-	id, err := runFzf(*maxAge, query, false)
-	if err != nil {
-		return err
+	if !*watch {
+		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort)
+		if err != nil {
+			return err
+		}
+		if id == "" {
+			return nil
+		}
+		return Resume([]string{id})
 	}
-	if id == "" {
-		return nil
+
+	for {
+		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true)
+		if err != nil {
+			return err
+		}
+		if id == "" {
+			return nil
+		}
+		if err := Resume([]string{id}); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: resume failed:", err)
+		}
 	}
-	return Resume([]string{id})
 }
 
-func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
+func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int) (string, error) {
+	return runFzfOpts(maxAge, query, popup, active, short, lshort, false)
+}
+
+func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, autoReload bool) (string, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
 	reloadCmd := fmt.Sprintf("%s list --fzf --max-age=%s", shellQuote(self), maxAge)
+	if active {
+		reloadCmd += " --active"
+	}
+	if short {
+		reloadCmd += " --short"
+	}
+	if lshort > 0 {
+		reloadCmd += fmt.Sprintf(" --lshort=%d", lshort)
+	}
+
+	useShort := short || lshort > 0
+	header := render.Header
+	if useShort {
+		header = render.HeaderShort
+	}
+	if lshort > 0 {
+		runes := []rune(header)
+		if len(runes) > lshort {
+			header = string(runes[:lshort])
+		}
+	}
 
 	fzfArgs := []string{
 		"--delimiter=\t",
@@ -46,7 +90,7 @@ func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
 		"--no-hscroll",
 		"--reverse",
 		"--no-info",
-		"--header=  STATE     AGE   TMUX             REPO/CWD                       SUMMARY",
+		"--header=" + header,
 		"--header-first",
 		"--prompt=session> ",
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
@@ -55,12 +99,16 @@ func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
 	if query != "" {
 		fzfArgs = append(fzfArgs, "--query="+query)
 	}
-	if popup {
+	if popup || autoReload {
+		interval := 2
+		if autoReload && !popup {
+			interval = 5
+		}
 		fzfArgs = append(fzfArgs,
 			"--listen=0",
-			"--bind=start:execute-silent(sh -c 'while sleep 2; do "+
-				"curl -s -XPOST localhost:$FZF_PORT -d \"reload("+reloadCmd+")\" >/dev/null 2>&1 || exit 0; "+
-				"done &')",
+			fmt.Sprintf("--bind=start:execute-silent(sh -c 'while sleep %d; do "+
+				"curl -s -XPOST localhost:$FZF_PORT -d \"reload(%s)\" >/dev/null 2>&1 || exit 0; "+
+				"done &')", interval, reloadCmd),
 		)
 	}
 
@@ -70,7 +118,7 @@ func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
 	// Feed the initial session list on stdin so fzf renders immediately
 	// — no fork+exec of `tsession list` between popup open and first paint.
 	// Refresh keeps working via ctrl-r and the popup-mode curl loop.
-	stdin, err := initialListBytes(maxAge)
+	stdin, err := initialListBytes(maxAge, active, short, lshort)
 	if err != nil {
 		// Non-fatal: fall back to empty stdin + reload-on-start so the
 		// picker still works even if the cache + live load both failed.
@@ -96,15 +144,36 @@ func runFzf(maxAge time.Duration, query string, popup bool) (string, error) {
 
 // initialListBytes renders the fzf-formatted session list in-process,
 // reusing the same cache-first path as `tsession list --fzf`.
-func initialListBytes(maxAge time.Duration) (string, error) {
+func initialListBytes(maxAge time.Duration, active, short bool, lshort int) (string, error) {
 	merged, err := loadAll(maxAge, false)
 	if err != nil {
 		return "", err
 	}
+	if active {
+		merged = filterActive(merged)
+	}
+	useShort := short || lshort > 0
 	now := time.Now()
 	var b strings.Builder
 	for _, s := range merged {
-		b.WriteString(render.FormatLine(s, now, false))
+		var line string
+		if useShort {
+			line = render.FormatLineShort(s, now, false)
+			if lshort > 0 {
+				display, suffix := line, ""
+				if i := strings.IndexByte(line, '\t'); i >= 0 {
+					display, suffix = line[:i], line[i:]
+				}
+				runes := []rune(display)
+				if len(runes) > lshort {
+					display = string(runes[:lshort])
+				}
+				line = display + suffix
+			}
+		} else {
+			line = render.FormatLine(s, now, false)
+		}
+		b.WriteString(line)
 		b.WriteByte('\n')
 	}
 	return b.String(), nil

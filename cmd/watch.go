@@ -136,73 +136,10 @@ func loadAllLive(maxAge time.Duration) ([]sessions.Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list tmux: %w", err)
 	}
-	return sessions.Merge(store, sd, tx), nil
-}
-
-// EnsureWatcherRunning starts a detached `tsession watch` daemon if one
-// is not already running. It is safe to call from any subcommand: if a
-// watcher is already up, this is a near-no-op. Errors are returned but
-// callers generally log-and-continue — a missing watcher just means the
-// caller falls back to a live load.
-//
-// When silent is true no output is printed on the happy "started"
-// path; use this for callers like `list --fzf` whose stdout is
-// machine-consumed.
-func EnsureWatcherRunning(silent bool) error {
-	if watcherAlive() {
-		return nil
-	}
-	// Clean up any stale pidfile so the freshly-spawned daemon's writePid
-	// reflects reality.
-	removePid()
-
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	const interval = 10 * time.Second
-	const maxAge = 14 * 24 * time.Hour
-
-	dir, err := cache.Dir()
-	if err != nil {
-		return err
-	}
-	logPath := filepath.Join(dir, "watch.log")
-	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer logFile.Close()
-	devNull, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0)
-	if err != nil {
-		return err
-	}
-	defer devNull.Close()
-
-	args := []string{
-		self,
-		"watch",
-		"--interval=" + interval.String(),
-		"--max-age=" + maxAge.String(),
-	}
-	env := append(os.Environ(), daemonEnvFlag+"=1")
-	attr := &os.ProcAttr{
-		Files: []*os.File{devNull, logFile, logFile},
-		Env:   env,
-		Sys:   &syscall.SysProcAttr{Setsid: true},
-	}
-	proc, err := os.StartProcess(self, args, attr)
-	if err != nil {
-		return err
-	}
-	pid := proc.Pid
-	_ = proc.Release()
-	if !silent {
-		fmt.Fprintf(os.Stderr, "tsession watch auto-started (pid=%d, log=%s)\n", pid, logPath)
-	}
-	// Give the child a moment to writePid and produce the first cache.
-	time.Sleep(150 * time.Millisecond)
-	return nil
+	panes, _ := tmux.ListPanes()
+	merged := sessions.Merge(store, sd, tx)
+	merged = sessions.ResolveTmuxByPID(merged, sd, panes)
+	return merged, nil
 }
 
 // watcherAlive returns true when the pidfile points at a live process.

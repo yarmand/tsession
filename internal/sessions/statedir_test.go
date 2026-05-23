@@ -76,3 +76,41 @@ func TestLoadStateDir_MissingEventsFile(t *testing.T) {
 		t.Fatalf("want one unknown entry, got %+v", got)
 	}
 }
+
+func TestLoadStateDir_ReadsCWDFromWorkspaceYAML(t *testing.T) {
+root := t.TempDir()
+dir := filepath.Join(root, "u-ws")
+writeEvents(t, dir, `{"type":"assistant.message","timestamp":"2026-05-17T10:00:00.000Z"}`)
+ws := "id: u-ws\ncwd: /Users/x/some/project\nname: Demo\n"
+if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte(ws), 0o644); err != nil {
+t.Fatal(err)
+}
+got, err := LoadStateDirsForIDs(root, []string{"u-ws"})
+if err != nil {
+t.Fatal(err)
+}
+if len(got) != 1 {
+t.Fatalf("want 1 entry, got %d", len(got))
+}
+if got[0].CWD != "/Users/x/some/project" {
+t.Errorf("CWD: want %q, got %q", "/Users/x/some/project", got[0].CWD)
+}
+}
+
+func TestMerge_PrefersStateDirCWDOverStore(t *testing.T) {
+store := []Session{{ID: "a", CWD: "/stale/path"}}
+sd := []StateDirInfo{{ID: "a", State: StateInactiveIdle, CWD: "/fresh/path"}}
+got := Merge(store, sd, nil)
+if len(got) != 1 || got[0].CWD != "/fresh/path" {
+t.Fatalf("want CWD /fresh/path, got %+v", got)
+}
+}
+
+func TestMerge_KeepsStoreCWDWhenStateDirEmpty(t *testing.T) {
+store := []Session{{ID: "a", CWD: "/store/path"}}
+sd := []StateDirInfo{{ID: "a", State: StateInactiveIdle}}
+got := Merge(store, sd, nil)
+if len(got) != 1 || got[0].CWD != "/store/path" {
+t.Fatalf("want CWD /store/path preserved, got %+v", got)
+}
+}

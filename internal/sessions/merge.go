@@ -26,6 +26,9 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 		if sd, ok := stateByID[s.ID]; ok {
 			s.State = sd.State
 			s.LastEventAt = sd.LastEventAt
+			if sd.CWD != "" {
+				s.CWD = sd.CWD
+			}
 		}
 		if name, ok := tmuxByPath[s.CWD]; ok {
 			s.TmuxName = name
@@ -51,8 +54,12 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 // bucket returns the primary sort group for a session (lower is earlier):
 //   0 — has an attached tmux session
 //   1 — is "active" (Waiting / Working / ActiveIdle), regardless of tmux
-//   2 — everything else (inactive idle / exited / unknown)
+//   2 — inactive idle / unknown
+//   3 — exited (always last)
 func bucket(s Session) int {
+	if s.State == StateExited {
+		return 3
+	}
 	if s.TmuxName != "" {
 		return 0
 	}

@@ -29,8 +29,12 @@ func Resume(args []string) error {
 		}
 	}
 
-	if match != nil && match.TmuxName != "" {
-		return tmux.SwitchClient(match.TmuxName)
+	if match != nil && (match.TmuxTarget != "" || match.TmuxName != "") {
+		target := match.TmuxTarget
+		if target == "" {
+			target = match.TmuxName
+		}
+		return tmux.SwitchClient(target)
 	}
 
 	if _, err := exec.LookPath("copilot"); err != nil {

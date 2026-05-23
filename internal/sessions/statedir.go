@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ type StateDirInfo struct {
 	State       State
 	LastEventAt time.Time
 	DBLocked    bool
+	CWD         string
+	PID         int
 }
 
 type eventLine struct {
@@ -86,7 +89,11 @@ func LoadStateDirsForIDs(root string, ids []string) ([]StateDirInfo, error) {
 			for i := range jobs {
 				id := ids[i]
 				dir := filepath.Join(root, id)
-				info := StateDirInfo{ID: id}
+				info := StateDirInfo{
+					ID:  id,
+					CWD: readWorkspaceCWD(filepath.Join(dir, "workspace.yaml")),
+					PID: readInusePID(dir),
+				}
 				ev, ts, ok := tailLastEvent(filepath.Join(dir, "events.jsonl"))
 				p := partial{idx: i, dbPath: filepath.Join(dir, "session.db")}
 				if !ok {
@@ -199,6 +206,52 @@ func parseEventLine(line string) (string, time.Time, bool) {
 	}
 	t, _ := time.Parse(time.RFC3339Nano, e.Timestamp)
 	return e.Type, t.UTC(), true
+}
+
+// readInusePID looks for an `inuse.<pid>.lock` file in dir and returns the
+// PID encoded in its name. The Copilot CLI writes this file while a session
+// is being actively held by a process; the PID identifies the owning
+// process, which we use to map the session back to a tmux pane.
+func readInusePID(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "inuse.") || !strings.HasSuffix(name, ".lock") {
+			continue
+		}
+		mid := name[len("inuse.") : len(name)-len(".lock")]
+		if pid, err := strconv.Atoi(mid); err == nil {
+			return pid
+		}
+	}
+	return 0
+}
+
+// readWorkspaceCWD extracts the `cwd:` value from a session's workspace.yaml.
+// The file is small and flat; we parse it manually to avoid pulling in a
+// YAML dependency. Returns "" if the file is missing or has no cwd entry.
+func readWorkspaceCWD(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	// Read a small bounded amount — workspace.yaml is tiny.
+	buf := make([]byte, 8192)
+	n, _ := io.ReadFull(f, buf)
+	for _, line := range strings.Split(string(buf[:n]), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "cwd:") {
+			continue
+		}
+		v := strings.TrimSpace(trimmed[len("cwd:"):])
+		v = strings.Trim(v, `"'`)
+		return v
+	}
+	return ""
 }
 
 // preliminaryState classifies based on the last event type alone.

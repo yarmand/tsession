@@ -2,21 +2,18 @@ package cmd
 
 import (
 	"flag"
-	"fmt"
-	"os"
 	"time"
 )
 
 func Popup(args []string) error {
 	fs := flag.NewFlagSet("popup", flag.ExitOnError)
 	maxAge := fs.Duration("max-age", 14*24*time.Hour, "ignore sessions older than this")
+	active := fs.Bool("active", false, "only show sessions attached to tmux with a known, non-exited state")
+	short := fs.Bool("short", false, "compact output: state, age, repo basename, summary truncated to 30 chars")
+	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
 	_ = fs.Parse(args)
 
-	if err := EnsureWatcherRunning(true); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: auto-start watcher failed:", err)
-	}
-
-	id, err := runFzf(*maxAge, "", true)
+	id, err := runFzf(*maxAge, "", true, *active, *short, *lshort)
 	if err != nil {
 		return err
 	}

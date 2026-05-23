@@ -39,4 +39,5 @@ type Session struct {
 	LastEventAt time.Time
 	State       State
 	TmuxName    string
+	TmuxTarget  string
 }

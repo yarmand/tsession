@@ -2,25 +2,32 @@ package render
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/yarma/tsession/internal/sessions"
 )
 
-const Header = "  STATE     AGE   TMUX             REPO/CWD                       SUMMARY"
+const Header = "  STATE     AGE   TMUX             REPO/CWD                       SUMMARY                                                                           ID"
+
+const HeaderShort = "  STATE     AGE   REPO/CWD             SUMMARY"
 
 func FormatLine(s sessions.Session, now time.Time, color bool) string {
+	return formatLine(s, now, color, false)
+}
+
+func FormatLineShort(s sessions.Session, now time.Time, color bool) string {
+	return formatLine(s, now, color, true)
+}
+
+func formatLine(s sessions.Session, now time.Time, color, short bool) string {
 	age := FormatAge(now.Sub(s.UpdatedAt))
 	state := s.State.String()
 	if color {
 		state = colorize(s.State, padRight(stateGlyph(s.State)+state, 9))
 	} else {
 		state = padRight(stateGlyph(s.State)+state, 9)
-	}
-	tmux := s.TmuxName
-	if tmux == "" {
-		tmux = "-"
 	}
 	repo := s.Repository
 	if repo == "" {
@@ -31,11 +38,29 @@ func FormatLine(s sessions.Session, now time.Time, color bool) string {
 		summary = "(no summary)"
 	}
 
-	display := fmt.Sprintf("  %s %-5s %-16s %-30s %s",
+	if short {
+		base := filepath.Base(repo)
+		if repo == "" {
+			base = "-"
+		}
+		display := fmt.Sprintf("  %s %-5s %-20s %-30s",
+			state, age,
+			truncate(base, 20),
+			truncate(summary, 30),
+		)
+		return display + "\t" + s.ID
+	}
+
+	tmux := s.TmuxName
+	if tmux == "" {
+		tmux = "-"
+	}
+	display := fmt.Sprintf("  %s %-5s %-16s %-30s %-80s  %s",
 		state, age,
 		truncate(tmux, 16),
 		truncate(repo, 30),
 		truncate(summary, 80),
+		s.ID,
 	)
 	return display + "\t" + s.ID
 }

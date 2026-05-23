@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/yarma/tsession/internal/cache"
@@ -17,33 +18,77 @@ func List(args []string) error {
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	fzfMode := fs.Bool("fzf", false, "emit tab-delimited lines for fzf consumption")
 	noCache := fs.Bool("no-cache", false, "ignore the watch cache and load live")
+	active := fs.Bool("active", false, "only show sessions attached to tmux with a known, non-exited state")
+	short := fs.Bool("short", false, "compact output: state, age, repo basename, summary truncated to 30 chars")
+	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
 	_ = fs.Parse(args)
-
-	if !*noCache {
-		if err := EnsureWatcherRunning(*fzfMode); err != nil {
-			fmt.Fprintln(os.Stderr, "warning: auto-start watcher failed:", err)
-		}
-	}
 
 	merged, err := loadAll(*maxAge, *noCache)
 	if err != nil {
 		return err
 	}
 
+	if *active {
+		merged = filterActive(merged)
+	}
+
+	useShort := *short || *lshort > 0
+
 	color := !*noColor && !*fzfMode
+	if *lshort > 0 {
+		color = false
+	}
 	now := time.Now()
 
 	if !*fzfMode {
+		header := render.Header
+		if useShort {
+			header = render.HeaderShort
+		}
+		if *lshort > 0 {
+			header = truncateRunes(header, *lshort)
+		}
 		if color {
-			fmt.Fprintln(os.Stdout, "\x1b[1;34m"+render.Header+"\x1b[0m")
+			fmt.Fprintln(os.Stdout, "\x1b[1;34m"+header+"\x1b[0m")
 		} else {
-			fmt.Fprintln(os.Stdout, render.Header)
+			fmt.Fprintln(os.Stdout, header)
 		}
 	}
 	for _, s := range merged {
-		fmt.Fprintln(os.Stdout, render.FormatLine(s, now, color))
+		if useShort {
+			line := render.FormatLineShort(s, now, color)
+			display, suffix := line, ""
+			if i := strings.IndexByte(line, '\t'); i >= 0 {
+				display, suffix = line[:i], line[i:]
+			}
+			if *lshort > 0 {
+				display = truncateRunes(display, *lshort)
+			}
+			if !*fzfMode {
+				line = display
+			} else {
+				line = display + suffix
+			}
+			fmt.Fprintln(os.Stdout, line)
+		} else {
+			fmt.Fprintln(os.Stdout, render.FormatLine(s, now, color))
+		}
 	}
 	return nil
+}
+
+// truncateRunes shortens s to at most n runes, preserving any leading ANSI
+// SGR escape sequences. We truncate on visible runes so colored headers
+// don't get cut mid-escape.
+func truncateRunes(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
 }
 
 // loadAll returns the merged session list. When a watcher cache exists and is
@@ -71,6 +116,23 @@ func filterByAge(in []sessions.Session, maxAge time.Duration) []sessions.Session
 	out := in[:0:0]
 	for _, s := range in {
 		if !s.UpdatedAt.IsZero() && s.UpdatedAt.Before(cutoff) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// filterActive keeps only sessions that are attached to a tmux session and
+// whose state is something other than exited/unknown — i.e. sessions a user
+// can resume right now and that have meaningful liveness signal.
+func filterActive(in []sessions.Session) []sessions.Session {
+	out := in[:0:0]
+	for _, s := range in {
+		if s.TmuxName == "" {
+			continue
+		}
+		if s.State == sessions.StateExited || s.State == sessions.StateUnknown {
 			continue
 		}
 		out = append(out, s)

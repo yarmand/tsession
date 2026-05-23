@@ -130,3 +130,20 @@ func idsOf(ss []Session) []string {
 	}
 	return out
 }
+
+func TestMerge_ExitedAlwaysLast_EvenWithTmux(t *testing.T) {
+now := time.Now()
+store := []Session{
+{ID: "exited-tmux",  CWD: "/x/e", UpdatedAt: now.Add(-1 * time.Minute)},
+{ID: "idle-no-tmux", CWD: "/x/i", UpdatedAt: now.Add(-5 * time.Minute)},
+}
+sd := []StateDirInfo{
+{ID: "exited-tmux",  State: StateExited},
+{ID: "idle-no-tmux", State: StateInactiveIdle},
+}
+tx := []tmux.Session{{Name: "e", Path: "/x/e"}}
+got := Merge(store, sd, tx)
+if got[0].ID != "idle-no-tmux" || got[1].ID != "exited-tmux" {
+t.Errorf("want exited last, got %v", idsOf(got))
+}
+}

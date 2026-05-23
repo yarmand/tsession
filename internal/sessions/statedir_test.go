@@ -24,20 +24,38 @@ func writeEvents(t *testing.T, dir string, lines ...string) {
 func TestLoadStateDir_InfersStateFromLastEvent(t *testing.T) {
 	root := t.TempDir()
 
+	// Each case is a chronological list of event lines; the classifier
+	// considers the recent window, not just the last line.
+	turnStart := `{"type":"assistant.turn_start","timestamp":"2026-05-17T10:00:00.000Z"}`
 	cases := []struct {
 		uuid string
-		last string
+		lines []string
 		want State
 	}{
-		{"u-work", `{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:00.000Z"}`, StateWorking},
-		{"u-wait", `{"type":"ask_question","timestamp":"2026-05-17T10:00:00.000Z"}`, StateWaiting},
-		{"u-perm", `{"type":"permission_request","timestamp":"2026-05-17T10:00:00.000Z"}`, StateWaiting},
-		{"u-exit", `{"type":"session.shutdown","timestamp":"2026-05-17T10:00:00.000Z"}`, StateExited},
-		{"u-idle", `{"type":"assistant.message","timestamp":"2026-05-17T10:00:00.000Z"}`, StateInactiveIdle},
+		{"u-work", []string{
+			turnStart,
+			`{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:01.000Z","data":{"toolName":"bash"}}`,
+		}, StateWorking},
+		{"u-wait", []string{
+			turnStart,
+			`{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:01.000Z","data":{"toolName":"ask_user"}}`,
+		}, StateWaiting},
+		{"u-perm", []string{
+			turnStart,
+			`{"type":"tool.user_requested","timestamp":"2026-05-17T10:00:01.000Z"}`,
+		}, StateWaiting},
+		{"u-exit", []string{
+			`{"type":"session.shutdown","timestamp":"2026-05-17T10:00:00.000Z"}`,
+		}, StateExited},
+		{"u-idle", []string{
+			turnStart,
+			`{"type":"assistant.message","timestamp":"2026-05-17T10:00:01.000Z"}`,
+			`{"type":"assistant.turn_end","timestamp":"2026-05-17T10:00:02.000Z"}`,
+		}, StateInactiveIdle},
 	}
 
 	for _, c := range cases {
-		writeEvents(t, filepath.Join(root, c.uuid), c.last)
+		writeEvents(t, filepath.Join(root, c.uuid), c.lines...)
 	}
 
 	got, err := LoadAllStateDirs(root)
@@ -112,5 +130,17 @@ sd := []StateDirInfo{{ID: "a", State: StateInactiveIdle}}
 got := Merge(store, sd, nil)
 if len(got) != 1 || got[0].CWD != "/store/path" {
 t.Fatalf("want CWD /store/path preserved, got %+v", got)
+}
+}
+
+func TestPreliminaryState_AskUserToolMeansWaiting(t *testing.T) {
+if s, _ := preliminaryState("tool.execution_start", "ask_user"); s != StateWaiting {
+t.Errorf("ask_user tool: want StateWaiting, got %s", s)
+}
+if s, _ := preliminaryState("tool.execution_start", "bash"); s != StateWorking {
+t.Errorf("bash tool: want StateWorking, got %s", s)
+}
+if s, _ := preliminaryState("session.shutdown", ""); s != StateExited {
+t.Errorf("shutdown: want StateExited, got %s", s)
 }
 }

@@ -82,10 +82,10 @@ for the full session list.
 
 ## State legend
 
-| Glyph | State    | Meaning                                                    |
-|-------|----------|------------------------------------------------------------|
-| ●     | working  | last event was `tool.execution_start` / `agent.processing` |
-| ◐     | waiting  | last event was `ask_question` / `permission_request`       |
-| ○     | active   | `session.db` held open by a live copilot process           |
-| ·     | idle     | no live process, no shutdown event                         |
-| ·     | exited   | `session.shutdown` event in `events.jsonl`                 |
+| Glyph | State    | Meaning                                                                |
+|-------|----------|------------------------------------------------------------------------|
+| ●     | working  | last event was `tool.execution_start` (non-prompting tool) / `agent.processing` |
+| ◐     | question | last event was `tool.execution_start` for `ask_user`/`ask_question`, or a permission request |
+| ○     | active   | `session.db` held open by a live copilot process                       |
+| ·     | idle     | no live process, no shutdown event                                     |
+| ·     | exited   | `session.shutdown` event in `events.jsonl`                             |

@@ -99,9 +99,11 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 	if query != "" {
 		fzfArgs = append(fzfArgs, "--query="+query)
 	}
-	if popup || autoReload {
+	autoIn5s := autoReload && !popup
+	autoIn2s := (popup && active) || (popup && autoReload)
+	if autoIn5s || autoIn2s {
 		interval := 2
-		if autoReload && !popup {
+		if autoIn5s {
 			interval = 5
 		}
 		fzfArgs = append(fzfArgs,

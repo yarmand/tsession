@@ -30,6 +30,9 @@ type StateDirInfo struct {
 type eventLine struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
+	Data      struct {
+		ToolName string `json:"toolName"`
+	} `json:"data"`
 }
 
 // LoadAllStateDirs scans every subdirectory under root. Retained for callers
@@ -94,7 +97,7 @@ func LoadStateDirsForIDs(root string, ids []string) ([]StateDirInfo, error) {
 					CWD: readWorkspaceCWD(filepath.Join(dir, "workspace.yaml")),
 					PID: readInusePID(dir),
 				}
-				ev, ts, ok := tailLastEvent(filepath.Join(dir, "events.jsonl"))
+				evs, ok := tailRecentEvents(filepath.Join(dir, "events.jsonl"))
 				p := partial{idx: i, dbPath: filepath.Join(dir, "session.db")}
 				if !ok {
 					info.State = StateUnknown
@@ -102,8 +105,9 @@ func LoadStateDirsForIDs(root string, ids []string) ([]StateDirInfo, error) {
 					results[i] = p
 					continue
 				}
-				info.LastEventAt = ts
-				state, needsLsof := preliminaryState(ev)
+				last := evs[len(evs)-1]
+				info.LastEventAt = last.TS
+				state, needsLsof := classifyFromEvents(evs)
 				info.State = state
 				p.needsLsof = needsLsof
 				p.info = info
@@ -149,63 +153,86 @@ func LoadStateDirsForIDs(root string, ids []string) ([]StateDirInfo, error) {
 	return out, nil
 }
 
-// tailLastEvent returns the last non-blank line of events.jsonl, parsed as
-// an event. It reads the file from the end in chunks so cost is O(line
-// size) rather than O(file size).
-func tailLastEvent(path string) (eventType string, ts time.Time, ok bool) {
+// parsedEvent is the structured form of a single events.jsonl line.
+type parsedEvent struct {
+	Type     string
+	ToolName string
+	TS       time.Time
+}
+
+// tailRecentEvents returns the last few events of events.jsonl, in
+// chronological order. It reads only the trailing window of the file so
+// cost stays O(window) regardless of total file size. Returns (nil, false)
+// if the file is missing or empty.
+func tailRecentEvents(path string) ([]parsedEvent, bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", time.Time{}, false
+		return nil, false
 	}
 	defer f.Close()
 
 	st, err := f.Stat()
 	if err != nil || st.Size() == 0 {
-		return "", time.Time{}, false
+		return nil, false
 	}
 
-	const chunk int64 = 4096
-	var (
-		size = st.Size()
-		buf  []byte
-		off  = size
-	)
-	for off > 0 {
-		read := chunk
-		if off < read {
-			read = off
-		}
-		off -= read
-		tmp := make([]byte, read)
-		if _, err := f.ReadAt(tmp, off); err != nil && err != io.EOF {
-			return "", time.Time{}, false
-		}
-		buf = append(tmp, buf...)
-		// Strip any trailing blank lines so we look for the *content* line.
-		trimmed := bytes.TrimRight(buf, "\n\r \t")
-		if i := bytes.LastIndexByte(trimmed, '\n'); i >= 0 {
-			line := strings.TrimSpace(string(trimmed[i+1:]))
-			return parseEventLine(line)
-		}
-		// Whole file (so far) is one line; if we've consumed it all, parse.
-		if off == 0 {
-			line := strings.TrimSpace(string(trimmed))
-			return parseEventLine(line)
+	const window int64 = 64 * 1024
+	size := st.Size()
+	off := int64(0)
+	if size > window {
+		off = size - window
+	}
+	buf := make([]byte, size-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return nil, false
+	}
+	// Drop a partial first line when we started mid-file.
+	if off > 0 {
+		if i := bytes.IndexByte(buf, '\n'); i >= 0 {
+			buf = buf[i+1:]
+		} else {
+			return nil, false
 		}
 	}
-	return "", time.Time{}, false
+	var out []parsedEvent
+	for _, raw := range bytes.Split(buf, []byte("\n")) {
+		line := strings.TrimSpace(string(raw))
+		if line == "" {
+			continue
+		}
+		typ, tn, ts, ok := parseEventLine(line)
+		if !ok {
+			continue
+		}
+		out = append(out, parsedEvent{Type: typ, ToolName: tn, TS: ts})
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
 }
 
-func parseEventLine(line string) (string, time.Time, bool) {
+// tailLastEvent is a thin wrapper that returns only the last parsed event,
+// used by callers that don't need history context.
+func tailLastEvent(path string) (eventType, toolName string, ts time.Time, ok bool) {
+	evs, ok := tailRecentEvents(path)
+	if !ok {
+		return "", "", time.Time{}, false
+	}
+	e := evs[len(evs)-1]
+	return e.Type, e.ToolName, e.TS, true
+}
+
+func parseEventLine(line string) (string, string, time.Time, bool) {
 	if line == "" {
-		return "", time.Time{}, false
+		return "", "", time.Time{}, false
 	}
 	var e eventLine
 	if err := json.Unmarshal([]byte(line), &e); err != nil {
-		return "", time.Time{}, false
+		return "", "", time.Time{}, false
 	}
 	t, _ := time.Parse(time.RFC3339Nano, e.Timestamp)
-	return e.Type, t.UTC(), true
+	return e.Type, e.Data.ToolName, t.UTC(), true
 }
 
 // readInusePID looks for an `inuse.<pid>.lock` file in dir and returns the
@@ -254,21 +281,97 @@ func readWorkspaceCWD(path string) string {
 	return ""
 }
 
-// preliminaryState classifies based on the last event type alone.
-// Returns (state, needsLsof). When needsLsof is true the caller must
-// disambiguate ActiveIdle vs InactiveIdle by checking session.db locking.
-func preliminaryState(eventType string) (State, bool) {
-	switch {
-	case strings.HasPrefix(eventType, "tool.execution_start"),
-		strings.HasPrefix(eventType, "agent.processing"):
+// classifyFromEvents derives a session state from the recent-event window.
+//
+// Decision order (first match wins):
+//  1. session.shutdown anywhere in the window → Exited.
+//  2. A `tool.execution_start` for a user-prompting tool (ask_user,
+//     ask_question, request_permission) without a matching
+//     tool.execution_complete after it → Waiting (rendered "question").
+//  3. The most recent `assistant.turn_start` is newer than the most recent
+//     `assistant.turn_end` → Working (the agent is mid-turn). This also
+//     covers the common bash/edit case where tool.execution_start +
+//     tool.execution_complete are followed by another tool start before the
+//     turn ends.
+//  4. The most recent `assistant.turn_end` is newer → unknown here, so we
+//     fall through to ActiveIdle/InactiveIdle (caller checks db lock):
+//     the agent has finished its turn and is waiting for the next user
+//     input.
+func classifyFromEvents(evs []parsedEvent) (State, bool) {
+	for _, e := range evs {
+		if e.Type == "session.shutdown" {
+			return StateExited, false
+		}
+	}
+
+	// Walk from the most recent event backward looking for an unmatched
+	// user-prompting tool.execution_start, or a tool.user_requested
+	// permission prompt that has not yet resolved.
+	completed := 0
+	for i := len(evs) - 1; i >= 0; i-- {
+		e := evs[i]
+		switch e.Type {
+		case "tool.execution_complete":
+			completed++
+		case "tool.user_requested":
+			return StateWaiting, false
+		case "tool.execution_start":
+			if completed > 0 {
+				completed--
+				continue
+			}
+			if isUserPromptingTool(e.ToolName) {
+				return StateWaiting, false
+			}
+		}
+	}
+
+	var lastStart, lastEnd time.Time
+	for _, e := range evs {
+		switch e.Type {
+		case "assistant.turn_start":
+			lastStart = e.TS
+		case "assistant.turn_end":
+			lastEnd = e.TS
+		}
+	}
+	if !lastStart.IsZero() && lastStart.After(lastEnd) {
 		return StateWorking, false
-	case strings.Contains(eventType, "ask_question"),
-		strings.Contains(eventType, "permission_request"):
-		return StateWaiting, false
+	}
+
+	// Fall back to the lsof-based active/inactive distinction for anything
+	// after turn end (idle waiting for user input).
+	return StateUnknown, true
+}
+
+// preliminaryState is retained for tests/callers that classify on a single
+// event. It mirrors classifyFromEvents for single-event inputs.
+func preliminaryState(eventType, toolName string) (State, bool) {
+	switch {
 	case eventType == "session.shutdown":
 		return StateExited, false
+	case strings.HasPrefix(eventType, "tool.execution_start"):
+		if isUserPromptingTool(toolName) {
+			return StateWaiting, false
+		}
+		return StateWorking, false
+	case strings.HasPrefix(eventType, "agent.processing"),
+		eventType == "assistant.turn_start":
+		return StateWorking, false
+	case eventType == "tool.user_requested",
+		strings.Contains(eventType, "permission_request"),
+		strings.Contains(eventType, "ask_question"):
+		return StateWaiting, false
 	default:
 		return StateUnknown, true
 	}
+}
+
+func isUserPromptingTool(name string) bool {
+	switch name {
+	case "ask_user", "ask_question", "request_permission":
+		return true
+	}
+	return false
 }
 

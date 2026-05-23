@@ -24,7 +24,7 @@ func (s State) String() string {
 	case StateWorking:
 		return "working"
 	case StateWaiting:
-		return "waiting"
+		return "question"
 	default:
 		return "unknown"
 	}

@@ -305,14 +305,23 @@ func classifyFromEvents(evs []parsedEvent) (State, bool) {
 	}
 
 	// Walk from the most recent event backward looking for an unmatched
-	// user-prompting tool.execution_start, or a tool.user_requested
-	// permission prompt that has not yet resolved.
+	// user-prompting tool.execution_start, a tool.user_requested prompt,
+	// or a permission.requested that has not yet been completed.
 	completed := 0
+	permCompleted := 0
 	for i := len(evs) - 1; i >= 0; i-- {
 		e := evs[i]
 		switch e.Type {
 		case "tool.execution_complete":
 			completed++
+		case "permission.completed":
+			permCompleted++
+		case "permission.requested":
+			if permCompleted > 0 {
+				permCompleted--
+				continue
+			}
+			return StateWaiting, false
 		case "tool.user_requested":
 			return StateWaiting, false
 		case "tool.execution_start":

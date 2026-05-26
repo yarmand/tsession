@@ -40,8 +40,8 @@ tsession stop-watch           # stop the running watcher
 |---------------------|------------------------------------------------------------------------------------------------------|
 | `--max-age <dur>`   | Ignore sessions older than this (default `336h` = 14 days).                                          |
 | `--active`          | Only show sessions attached to tmux whose state is neither `exited` nor `unknown`.                   |
-| `--short`           | Compact rendering: `state`, `age`, `basename(cwd)`, first 30 chars of summary.                       |
-| `--lshort <n>`      | Implies `--short`; additionally truncate each line to `n` characters. Disables color.                 |
+| `--short`           | Compact rendering: state glyph, `originLetter-basename(cwd)`, summary (30 chars), age suffix. In `browse`/`popup`, shows a right-side preview with an origin legend. |
+| `--lshort <n>`      | Implies `--short`; additionally truncate each display line to `n` characters (preserves the age suffix). Disables color. |
 | `--no-color`        | (list only) Disable ANSI colors.                                                                     |
 | `--fzf`             | (list only) Tab-delimited output for fzf consumption (display + selection ID).                       |
 | `--no-cache`        | (list only) Skip the watcher cache and load live.                                                    |

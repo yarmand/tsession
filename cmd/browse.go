@@ -101,7 +101,7 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 	}
 	if useShort {
 		fzfArgs = append(fzfArgs,
-			"--preview-window=right:60%:wrap",
+			"--preview-window=down:12:wrap",
 			`--preview=sh -c 'legend=$(printf "%b" "$7"); printf "ID: %s\nState: %s\nAge: %s\nCWD: %s\nRepo: %s\n\n%s\n\nOrigins:\n%s\n" "$1" "$2" "$3" "$4" "$5" "$6" "$legend"' _ {2} {6} {7} {4} {3} {8} {9}`,
 		)
 	}

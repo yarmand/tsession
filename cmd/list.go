@@ -33,12 +33,20 @@ func List(args []string) error {
 	}
 
 	useShort := *short || *lshort > 0
+	if useShort {
+		enrichOrigins(merged)
+	}
 
 	color := !*noColor && !*fzfMode
 	if *lshort > 0 {
 		color = false
 	}
 	now := time.Now()
+
+	var shortCtx render.ShortContext
+	if useShort {
+		shortCtx = render.BuildShortContext(merged)
+	}
 
 	if !*fzfMode {
 		header := render.Header
@@ -54,22 +62,40 @@ func List(args []string) error {
 			fmt.Fprintln(os.Stdout, header)
 		}
 	}
+
 	for _, s := range merged {
 		if useShort {
-			line := render.FormatLineShort(s, now, color)
-			display, suffix := line, ""
-			if i := strings.IndexByte(line, '\t'); i >= 0 {
-				display, suffix = line[:i], line[i:]
+			line := render.FormatLineShortWithContext(s, now, color, shortCtx, *lshort)
+			parts := strings.SplitN(line, "\t", 2)
+			display, id := parts[0], ""
+			if len(parts) == 2 {
+				id = parts[1]
 			}
-			if *lshort > 0 {
-				display = truncateRunes(display, *lshort)
-			}
-			if !*fzfMode {
-				line = display
+
+			if *fzfMode {
+				ts := s.LastEventAt
+				if ts.IsZero() {
+					ts = s.UpdatedAt
+				}
+				age := render.FormatAge(now.Sub(ts))
+				summary := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " "), "\t", " ")
+				if summary == "" {
+					summary = "(no summary)"
+				}
+				fmt.Fprintf(os.Stdout, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					display,
+					id,
+					s.Repository,
+					s.CWD,
+					render.OriginShortName(s.Repository),
+					s.State.String(),
+					age,
+					summary,
+					shortCtx.LegendField(),
+				)
 			} else {
-				line = display + suffix
+				fmt.Fprintln(os.Stdout, display)
 			}
-			fmt.Fprintln(os.Stdout, line)
 		} else {
 			fmt.Fprintln(os.Stdout, render.FormatLine(s, now, color))
 		}

@@ -99,6 +99,12 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 	if query != "" {
 		fzfArgs = append(fzfArgs, "--query="+query)
 	}
+	if useShort {
+		fzfArgs = append(fzfArgs,
+			"--preview-window=right:60%:wrap",
+			`--preview=sh -c 'legend=$(printf "%b" "$7"); printf "ID: %s\nState: %s\nAge: %s\nCWD: %s\nRepo: %s\n\n%s\n\nOrigins:\n%s\n" "$1" "$2" "$3" "$4" "$5" "$6" "$legend"' _ {2} {6} {7} {4} {3} {8} {9}`,
+		)
+	}
 	autoIn5s := autoReload && !popup
 	autoIn2s := (popup && active) || (popup && autoReload)
 	if autoIn5s || autoIn2s {
@@ -155,28 +161,51 @@ func initialListBytes(maxAge time.Duration, active, short bool, lshort int) (str
 		merged = filterActive(merged)
 	}
 	useShort := short || lshort > 0
+	if useShort {
+		enrichOrigins(merged)
+	}
 	now := time.Now()
+
+	var shortCtx render.ShortContext
+	if useShort {
+		shortCtx = render.BuildShortContext(merged)
+	}
+
 	var b strings.Builder
 	for _, s := range merged {
-		var line string
 		if useShort {
-			line = render.FormatLineShort(s, now, false)
-			if lshort > 0 {
-				display, suffix := line, ""
-				if i := strings.IndexByte(line, '\t'); i >= 0 {
-					display, suffix = line[:i], line[i:]
-				}
-				runes := []rune(display)
-				if len(runes) > lshort {
-					display = string(runes[:lshort])
-				}
-				line = display + suffix
+			line := render.FormatLineShortWithContext(s, now, false, shortCtx, lshort)
+			parts := strings.SplitN(line, "\t", 2)
+			display, id := parts[0], ""
+			if len(parts) == 2 {
+				id = parts[1]
 			}
+
+			ts := s.LastEventAt
+			if ts.IsZero() {
+				ts = s.UpdatedAt
+			}
+			age := render.FormatAge(now.Sub(ts))
+			summary := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " "), "\t", " ")
+			if summary == "" {
+				summary = "(no summary)"
+			}
+
+			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				display,
+				id,
+				s.Repository,
+				s.CWD,
+				render.OriginShortName(s.Repository),
+				s.State.String(),
+				age,
+				summary,
+				shortCtx.LegendField(),
+			)
 		} else {
-			line = render.FormatLine(s, now, false)
+			b.WriteString(render.FormatLine(s, now, false))
+			b.WriteByte('\n')
 		}
-		b.WriteString(line)
-		b.WriteByte('\n')
 	}
 	return b.String(), nil
 }

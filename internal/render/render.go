@@ -40,7 +40,10 @@ func FormatLineShortWithContext(s sessions.Session, now time.Time, color bool, c
 
 	letter := ctx.letterForOrigin(s.Repository)
 	name := shortWorktreeName(s)
-	repoCol := letter + "-" + name
+	repoCol := name
+	if letter != "" {
+		repoCol = letter + "-" + name
+	}
 
 	summary := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " "), "\t", " ")
 	if summary == "" {

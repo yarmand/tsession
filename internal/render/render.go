@@ -2,7 +2,6 @@ package render
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,17 +10,61 @@ import (
 
 const Header = "  STATE     AGE   TMUX             REPO/CWD                       SUMMARY                                                                           ID"
 
-const HeaderShort = "  STATE     AGE   REPO/CWD             SUMMARY"
+const HeaderShort = "  S  REPO/CWD                   SUMMARY                          AGE"
 
 func FormatLine(s sessions.Session, now time.Time, color bool) string {
-	return formatLine(s, now, color, false)
+	return formatLineLong(s, now, color)
 }
 
+// FormatLineShort renders the compact display form. For best results (origin
+// letters + legend), prefer FormatLineShortWithContext with a context built from
+// the full session list.
 func FormatLineShort(s sessions.Session, now time.Time, color bool) string {
-	return formatLine(s, now, color, true)
+	return FormatLineShortWithContext(s, now, color, ShortContext{}, 0)
 }
 
-func formatLine(s sessions.Session, now time.Time, color, short bool) string {
+// FormatLineShortWithContext renders a --short line with the provided origin-letter
+// context. If lshort > 0, the display is truncated to at most lshort runes while
+// preserving the age suffix.
+func FormatLineShortWithContext(s sessions.Session, now time.Time, color bool, ctx ShortContext, lshort int) string {
+	ts := s.LastEventAt
+	if ts.IsZero() {
+		ts = s.UpdatedAt
+	}
+	age := FormatAge(now.Sub(ts))
+
+	glyph := strings.TrimSpace(stateGlyph(s.State))
+	if color {
+		glyph = colorize(s.State, glyph)
+	}
+
+	letter := ctx.letterForOrigin(s.Repository)
+	name := shortWorktreeName(s)
+	repoCol := letter + "-" + name
+
+	summary := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " "), "\t", " ")
+	if summary == "" {
+		summary = "(no summary)"
+	}
+
+	prefix := "  " + glyph + " " + padRight(truncate(repoCol, 24), 24) + " "
+	suffix := " " + age
+
+	// Default summary truncation in --short (when not using --lshort)
+	if lshort <= 0 {
+		display := prefix + truncate(summary, 30) + suffix
+		return display + "\t" + s.ID
+	}
+
+	budget := lshort - len([]rune(prefix)) - len([]rune(suffix))
+	if budget < 0 {
+		budget = 0
+	}
+	display := prefix + truncate(summary, budget) + suffix
+	return display + "\t" + s.ID
+}
+
+func formatLineLong(s sessions.Session, now time.Time, color bool) string {
 	ts := s.LastEventAt
 	if ts.IsZero() {
 		ts = s.UpdatedAt
@@ -40,19 +83,6 @@ func formatLine(s sessions.Session, now time.Time, color, short bool) string {
 	summary := strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " ")
 	if summary == "" {
 		summary = "(no summary)"
-	}
-
-	if short {
-		base := filepath.Base(repo)
-		if repo == "" {
-			base = "-"
-		}
-		display := fmt.Sprintf("  %s %-5s %-20s %-30s",
-			state, age,
-			truncate(base, 20),
-			truncate(summary, 30),
-		)
-		return display + "\t" + s.ID
 	}
 
 	tmux := s.TmuxName

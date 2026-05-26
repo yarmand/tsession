@@ -57,3 +57,76 @@ func TestFormatAge(t *testing.T) {
 		}
 	}
 }
+
+func TestOriginShortName(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"ps://github.com/yarmand/tsession.git", "tsession"},
+		{"https://github.com/yarmand/tsession", "tsession"},
+		{"git@github.com:yarmand/tsession.git", "tsession"},
+		{"gh/yarmand/tsession", "tsession"},
+		{"", "-"},
+	}
+	for _, c := range cases {
+		if got := originShortName(c.in); got != c.want {
+			t.Errorf("originShortName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestFormatLineShort_GlyphOnlyAndAgeAtEnd(t *testing.T) {
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	s := sessions.Session{
+		ID:          "uuid-123",
+		CWD:         "/tmp/worktrees/better-short",
+		Repository:  "ps://github.com/yarmand/tsession.git",
+		Summary:     "do the thing",
+		LastEventAt: now.Add(-5 * time.Minute),
+		State:       sessions.StateWorking,
+	}
+	ctx := buildShortContext([]sessions.Session{s})
+	got := FormatLineShortWithContext(s, now, false, ctx, 0)
+	parts := strings.Split(got, "\t")
+	if len(parts) != 2 {
+		t.Fatalf("want 2 fields (display + id), got %d: %q", len(parts), got)
+	}
+	display := parts[0]
+	if strings.Contains(display, "working") {
+		t.Fatalf("short display should not contain state text: %q", display)
+	}
+	if !strings.Contains(display, "●") {
+		t.Fatalf("short display should contain glyph: %q", display)
+	}
+	if !strings.Contains(display, "A-better-short") {
+		t.Fatalf("short display should contain origin-letter prefixed worktree: %q", display)
+	}
+	trim := strings.TrimRight(display, " ")
+	if !strings.HasSuffix(trim, "5m") {
+		t.Fatalf("short display should end with age '5m': %q", display)
+	}
+}
+
+func TestFormatLineShort_LshortPreservesAge(t *testing.T) {
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	s := sessions.Session{
+		ID:          "uuid-123",
+		CWD:         "/tmp/worktrees/better-short",
+		Repository:  "ps://github.com/yarmand/tsession.git",
+		Summary:     strings.Repeat("x", 200),
+		LastEventAt: now.Add(-5 * time.Minute),
+		State:       sessions.StateWorking,
+	}
+	ctx := buildShortContext([]sessions.Session{s})
+	got := FormatLineShortWithContext(s, now, false, ctx, 32)
+	parts := strings.Split(got, "\t")
+	display := parts[0]
+	if len([]rune(display)) > 32 {
+		t.Fatalf("want display <= 32 runes, got %d: %q", len([]rune(display)), display)
+	}
+	trim := strings.TrimRight(display, " ")
+	if !strings.HasSuffix(trim, "5m") {
+		t.Fatalf("lshort display should still end with age '5m': %q", display)
+	}
+}

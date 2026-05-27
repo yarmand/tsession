@@ -95,6 +95,8 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 		"--prompt=session> ",
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
 		"--bind=ctrl-y:execute-silent(echo -n {2} | pbcopy)+abort",
+		"--bind=c:execute-silent(" + shellQuote(self) + " vscode {2})+abort",
+		"--bind=r:execute(" + shellQuote(self) + " rename {2})+reload(" + reloadCmd + ")",
 	}
 	if query != "" {
 		fzfArgs = append(fzfArgs, "--query="+query)

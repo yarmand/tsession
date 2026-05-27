@@ -124,6 +124,9 @@ func originShortName(origin string) string {
 }
 
 func shortWorktreeName(s sessions.Session) string {
+	if s.Name != "" {
+		return s.Name
+	}
 	if strings.TrimSpace(s.CWD) != "" {
 		return filepath.Base(s.CWD)
 	}

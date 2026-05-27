@@ -8,9 +8,9 @@ import (
 	"github.com/yarma/tsession/internal/sessions"
 )
 
-const Header = "  STATE     AGE   TMUX             REPO/CWD                       SUMMARY                                                                           ID"
+const Header = "  STATE     AGE   TMUX             NAME                           SUMMARY                                                                           ID"
 
-const HeaderShort = "  S  REPO/CWD                   SUMMARY                          AGE"
+const HeaderShort = "  S  NAME                        SUMMARY                          AGE"
 
 func FormatLine(s sessions.Session, now time.Time, color bool) string {
 	return formatLineLong(s, now, color)
@@ -79,7 +79,10 @@ func formatLineLong(s sessions.Session, now time.Time, color bool) string {
 	} else {
 		state = padRight(stateGlyph(s.State)+state, 9)
 	}
-	repo := s.Repository
+	repo := s.Name
+	if repo == "" {
+		repo = s.Repository
+	}
 	if repo == "" {
 		repo = s.CWD
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/yarma/tsession/internal/donestate"
+	"github.com/yarma/tsession/internal/names"
 	"github.com/yarma/tsession/internal/tmux"
 )
 
@@ -21,6 +22,11 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 			tmuxByPath[t.Path] = t.Name
 		}
 		tmuxByBase[t.Name] = t.Name
+	}
+
+	sessionNames, _ := names.Load()
+	if sessionNames == nil {
+		sessionNames = map[string]string{}
 	}
 
 	rt, _ := donestate.Load()
@@ -43,6 +49,9 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 			s.TmuxName = name
 		} else if name, ok := tmuxByBase[filepath.Base(s.CWD)]; ok && s.CWD != "" {
 			s.TmuxName = name
+		}
+		if n, ok := sessionNames[s.ID]; ok {
+			s.Name = n
 		}
 
 		raw := s.State

@@ -43,4 +43,5 @@ type Session struct {
 	State       State
 	TmuxName    string
 	TmuxTarget  string
+	Name        string // user-defined display name (from ~/.tsession/names.json)
 }

@@ -29,6 +29,10 @@ func main() {
 		err = cmd.Watch(args)
 	case "stop-watch":
 		err = cmd.StopWatch(args)
+	case "vscode":
+		err = cmd.Vscode(args)
+	case "rename":
+		err = cmd.Rename(args)
 	case "-h", "--help", "help":
 		usage()
 		return

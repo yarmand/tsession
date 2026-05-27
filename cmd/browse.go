@@ -86,7 +86,7 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 	renameCmd := shellQuote(self) + " rename {2}"
 	renameBinding := "--bind=r:execute(" + renameCmd + ")+reload(" + reloadCmd + ")"
 	if tmux.InTmux() {
-		renameBinding = "--bind=r:execute-silent(tmux display-popup -E " + shellQuote(self+" rename {2}") + ")+reload(" + reloadCmd + ")"
+		renameBinding = "--bind=r:execute-silent(tmux display-popup -E " + shellQuote(self) + " rename {2})+reload(" + reloadCmd + ")"
 	}
 
 	fzfArgs := []string{

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/yarma/tsession/internal/names"
+	"github.com/yarma/tsession/internal/sessions"
 )
 
 func Rename(args []string) error {
@@ -20,7 +22,9 @@ func Rename(args []string) error {
 	if len(args) >= 2 {
 		name = strings.Join(args[1:], " ")
 	} else {
-		// Interactive prompt
+		// Show session context so the user knows what they're renaming
+		displaySessionContext(id)
+
 		current := names.Get(id)
 		if current != "" {
 			fmt.Printf("Current name: %s\n", current)
@@ -41,4 +45,36 @@ func Rename(args []string) error {
 		fmt.Printf("Renamed to: %s\n", name)
 	}
 	return nil
+}
+
+// displaySessionContext prints repo/cwd and summary for the session being renamed.
+func displaySessionContext(id string) {
+	merged, err := loadAll(14*24*time.Hour, false)
+	if err != nil {
+		return
+	}
+	var match *sessions.Session
+	for i := range merged {
+		if merged[i].ID == id {
+			match = &merged[i]
+			break
+		}
+	}
+	if match == nil {
+		return
+	}
+	loc := match.Repository
+	if loc == "" {
+		loc = match.CWD
+	}
+	if loc != "" {
+		fmt.Printf("Session: %s\n", loc)
+	}
+	if match.Summary != "" {
+		summary := match.Summary
+		if len(summary) > 60 {
+			summary = summary[:59] + "…"
+		}
+		fmt.Printf("Summary: %s\n", summary)
+	}
 }

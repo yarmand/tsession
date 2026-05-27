@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yarma/tsession/internal/render"
+	"github.com/yarma/tsession/internal/tmux"
 )
 
 func Browse(args []string) error {
@@ -82,6 +83,12 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 		}
 	}
 
+	renameCmd := shellQuote(self) + " rename {2}"
+	renameBinding := "--bind=r:execute(" + renameCmd + ")+reload(" + reloadCmd + ")"
+	if tmux.InTmux() {
+		renameBinding = "--bind=r:execute-silent(tmux display-popup -E " + shellQuote(self+" rename {2}") + ")+reload(" + reloadCmd + ")"
+	}
+
 	fzfArgs := []string{
 		"--delimiter=\t",
 		"--with-nth=1",
@@ -96,7 +103,7 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
 		"--bind=ctrl-y:execute-silent(echo -n {2} | pbcopy)+abort",
 		"--bind=c:execute-silent(" + shellQuote(self) + " vscode {2})+abort",
-		"--bind=r:execute(" + shellQuote(self) + " rename {2})+reload(" + reloadCmd + ")",
+		renameBinding,
 	}
 	if query != "" {
 		fzfArgs = append(fzfArgs, "--query="+query)

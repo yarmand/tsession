@@ -61,6 +61,11 @@ func SwitchClient(name string) error {
 
 func InTmux() bool { return os.Getenv("TMUX") != "" }
 
+// RenameSession renames a tmux session from oldName to newName.
+func RenameSession(oldName, newName string) error {
+	return exec.Command("tmux", "rename-session", "-t", oldName, newName).Run()
+}
+
 // ListPanes returns one entry per tmux pane across all sessions, with the
 // pane's foreground/root PID. Used to map a Copilot CLI process to the tmux
 // session that contains it (by walking the process tree up from the

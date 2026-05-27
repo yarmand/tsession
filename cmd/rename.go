@@ -10,6 +10,7 @@ import (
 
 	"github.com/yarma/tsession/internal/names"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/tmux"
 )
 
 func Rename(args []string) error {
@@ -39,6 +40,14 @@ func Rename(args []string) error {
 	if err := names.Set(id, name); err != nil {
 		return err
 	}
+
+	// Rename the corresponding tmux session if one exists
+	if name != "" {
+		if match := findSession(id); match != nil && match.TmuxName != "" {
+			_ = tmux.RenameSession(match.TmuxName, name)
+		}
+	}
+
 	if name == "" {
 		fmt.Println("Name cleared.")
 	} else {
@@ -49,17 +58,7 @@ func Rename(args []string) error {
 
 // displaySessionContext prints repo/cwd and summary for the session being renamed.
 func displaySessionContext(id string) {
-	merged, err := loadAll(14*24*time.Hour, false)
-	if err != nil {
-		return
-	}
-	var match *sessions.Session
-	for i := range merged {
-		if merged[i].ID == id {
-			match = &merged[i]
-			break
-		}
-	}
+	match := findSession(id)
 	if match == nil {
 		return
 	}
@@ -77,4 +76,17 @@ func displaySessionContext(id string) {
 		}
 		fmt.Printf("Summary: %s\n", summary)
 	}
+}
+
+func findSession(id string) *sessions.Session {
+	merged, err := loadAll(14*24*time.Hour, false)
+	if err != nil {
+		return nil
+	}
+	for i := range merged {
+		if merged[i].ID == id {
+			return &merged[i]
+		}
+	}
+	return nil
 }

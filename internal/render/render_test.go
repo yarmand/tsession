@@ -130,3 +130,34 @@ func TestFormatLineShort_LshortPreservesAge(t *testing.T) {
 		t.Fatalf("lshort display should still end with age '5m': %q", display)
 	}
 }
+
+func TestFormatSectionDivider(t *testing.T) {
+	got := FormatSectionDivider("devbox", true, 0)
+	if !strings.Contains(got, "devbox") {
+		t.Errorf("divider missing name: %q", got)
+	}
+	if !strings.Contains(got, "──") {
+		t.Errorf("divider missing box chars: %q", got)
+	}
+	if !strings.HasSuffix(got, "\t") {
+		t.Errorf("divider should end with tab (empty ID): %q", got)
+	}
+}
+
+func TestFormatSectionDividerNoColor(t *testing.T) {
+	got := FormatSectionDivider("Local", false, 0)
+	if strings.Contains(got, "\x1b[") {
+		t.Error("no-color divider contains ANSI escape")
+	}
+	if !strings.Contains(got, "Local") {
+		t.Errorf("divider missing name: %q", got)
+	}
+}
+
+func TestFormatSectionDividerLshort(t *testing.T) {
+	got := FormatSectionDivider("devbox", false, 20)
+	runes := []rune(strings.Split(got, "\t")[0])
+	if len(runes) > 20 {
+		t.Errorf("lshort divider has %d runes, want <=20", len(runes))
+	}
+}

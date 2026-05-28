@@ -32,9 +32,13 @@ func Browse(args []string) error {
 	}
 
 	for {
-		_, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true)
+		selected, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true)
 		if err != nil {
 			return err
+		}
+		// User pressed esc/ctrl-q — fzf exited with 130, no selection made.
+		if selected == "" {
+			return nil
 		}
 	}
 }

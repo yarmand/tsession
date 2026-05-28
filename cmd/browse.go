@@ -27,26 +27,14 @@ func Browse(args []string) error {
 	}
 
 	if !*watch {
-		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort)
-		if err != nil {
-			return err
-		}
-		if id == "" {
-			return nil
-		}
-		return Resume([]string{id})
+		_, err := runFzf(*maxAge, query, false, *active, *short, *lshort)
+		return err
 	}
 
 	for {
-		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true)
+		_, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true)
 		if err != nil {
 			return err
-		}
-		if id == "" {
-			return nil
-		}
-		if err := Resume([]string{id}); err != nil {
-			fmt.Fprintln(os.Stderr, "warning: resume failed:", err)
 		}
 	}
 }
@@ -83,10 +71,18 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 		}
 	}
 
+	helpText := `Keybindings:
+  enter     Switch to session
+  ctrl-e    Open in VS Code
+  ctrl-n    Rename session
+  ctrl-r    Reload list
+  ?         Show this help
+  esc/q     Exit`
+
 	renameCmd := shellQuote(self) + " rename {2}"
-	renameBinding := "--bind=r:execute(" + renameCmd + ")+reload(" + reloadCmd + ")"
+	renameBinding := "--bind=ctrl-n:execute(" + renameCmd + ")+reload(" + reloadCmd + ")"
 	if tmux.InTmux() {
-		renameBinding = "--bind=r:execute-silent(tmux display-popup -E " + shellQuote(self) + " rename {2})+reload(" + reloadCmd + ")"
+		renameBinding = "--bind=ctrl-n:execute-silent(tmux display-popup -E " + shellQuote(self) + " rename {2})+reload(" + reloadCmd + ")"
 	}
 
 	fzfArgs := []string{
@@ -100,9 +96,14 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 		"--header=" + header,
 		"--header-first",
 		"--prompt=session> ",
+		"--border=none",
+		"--footer= ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
+		"--footer-border=none",
+		"--color=footer:blue:bold",
+		"--bind=enter:execute-silent(" + shellQuote(self) + " resume {2})",
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
-		"--bind=ctrl-y:execute-silent(echo -n {2} | pbcopy)+abort",
-		"--bind=c:execute-silent(" + shellQuote(self) + " vscode {2})+abort",
+		"--bind=ctrl-e:execute-silent(" + shellQuote(self) + " vscode {2})",
+		"--bind=?:preview(echo " + shellQuote(helpText) + ")",
 		renameBinding,
 	}
 	if query != "" {

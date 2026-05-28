@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -100,14 +101,33 @@ func StopWatch(args []string) error {
 }
 
 func refresh(interval, maxAge time.Duration) error {
-	merged, err := loadAllLive(maxAge)
+	local, err := loadAllLiveFn(maxAge)
 	if err != nil {
 		return err
 	}
+
+	allSessions := append([]sessions.Session(nil), local...)
+
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if len(cfg.Remotes) > 0 {
+		remoteMap, warnings := fetchRemoteSessions(context.Background(), cfg.Remotes, maxAge, 10*time.Second)
+		for _, warning := range warnings {
+			fmt.Fprintln(os.Stderr, "warning:", warning)
+		}
+		for _, r := range cfg.Remotes {
+			if s, ok := remoteMap[r.Name]; ok {
+				allSessions = append(allSessions, s...)
+			}
+		}
+	}
+
 	return cache.Write(cache.File{
 		UpdatedAt: time.Now().UTC(),
 		Interval:  interval,
-		Sessions:  merged,
+		Sessions:  allSessions,
 	})
 }
 
@@ -197,8 +217,6 @@ func watcherAlive() bool {
 	}
 	return true
 }
-
-
 
 func writePid(pid int) error {
 	p, err := cache.PidPath()

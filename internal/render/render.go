@@ -170,3 +170,27 @@ func truncate(s string, n int) string {
 	}
 	return s[:n-1] + "…"
 }
+
+// FormatSectionDivider renders a visual separator line for grouping sessions
+// by origin (local vs remote). The returned string is tab-delimited with an
+// empty second field so fzf's --accept-nth=2 returns "" (no-op on selection).
+func FormatSectionDivider(name string, color bool, lshort int) string {
+	label := "── " + name + " "
+	targetWidth := 60
+	if lshort > 0 && lshort < targetWidth {
+		targetWidth = lshort
+	}
+	for len([]rune(label)) < targetWidth {
+		label += "─"
+	}
+	if lshort > 0 {
+		runes := []rune(label)
+		if len(runes) > lshort {
+			label = string(runes[:lshort])
+		}
+	}
+	if color {
+		label = "\x1b[1;90m" + label + "\x1b[0m"
+	}
+	return label + "\t"
+}

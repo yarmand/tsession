@@ -47,6 +47,7 @@ tsession stop-watch           # stop the running watcher
 | `--no-color`        | (list only) Disable ANSI colors.                                                                     |
 | `--fzf`             | (list only) Tab-delimited output for fzf consumption (display + selection ID).                       |
 | `--no-cache`        | (list only) Skip the watcher cache and load live.                                                    |
+| `--local-only`      | Skip remote session gathering (useful offline or for speed).                                         |
 | `--watch`           | (browse only) Auto-refresh the list every 5s and re-open the picker after each selection. `ESC` exits. |
 | `--target <value>`  | (browse, resume) Switch a different tmux client instead of the current one. Pass a `/dev/...` client path directly, or any other value (e.g. `pick`) to choose interactively via fzf at startup. The chosen target is used for all subsequent selections. |
 
@@ -118,3 +119,67 @@ for the full session list.
 | ○     | active   | `session.db` held open by a live copilot process                       |
 | ·     | idle     | no live process, no shutdown event                                     |
 | ·     | exited   | `session.shutdown` event in `events.jsonl`                             |
+
+## Remote Sessions
+
+Display Copilot CLI sessions running on remote machines alongside your local
+sessions.
+
+### Setup
+
+Create `~/.config/tsession/config.yaml`:
+
+```yaml
+remotes:
+  - name: devbox          # Section label in the picker
+    host: devbox.local    # SSH host (as in ~/.ssh/config or user@host)
+  - name: server
+    host: user@server.example.com
+    copilot_dir: /home/user/.copilot  # Optional, defaults to ~/.copilot
+```
+
+**Requirements on the remote:**
+- `bash` and `sqlite3` must be available in PATH
+- `tmux` (optional — enables pane-level matching)
+- SSH must be configured for passwordless access (key-based auth)
+
+### How it works
+
+`tsession` runs a lightweight gather script over SSH that collects session data
+from the remote's `~/.copilot/` directory and tmux state. Data is returned as
+JSON in a single SSH round-trip. Each remote appears as its own section:
+
+```
+── Local ──────────────────────────────────────────────────────────
+  ● working  2m  tsession    Fix browse layout
+  ○ active   1h  myproject   Add auth module
+── devbox ─────────────────────────────────────────────────────────
+  ● working  5m  backend     Implement caching
+  · idle     3h  infra       Terraform refactor
+```
+
+### Resume behavior
+
+Selecting a remote session opens an interactive SSH connection:
+- If the session is attached to a tmux pane: `ssh -t <host> tmux attach -t <target>`
+- Otherwise: `ssh -t <host> copilot --resume=<id>`
+
+### Flags
+
+| Flag           | Description                                        |
+|----------------|----------------------------------------------------|
+| `--local-only` | Skip remote gathering (useful offline or for speed) |
+
+### Caching
+
+When `tsession watch` is running, remote data is gathered alongside local data
+on each refresh cycle. Each remote has a 10-second timeout — unreachable hosts
+are skipped with a warning without blocking the local cache update.
+
+### Troubleshooting
+
+- **Remote unreachable:** The section shows as
+  `── devbox (unreachable) ──` and local sessions work normally.
+- **sqlite3 not found:** The remote is skipped. Install `sqlite3` on the remote.
+- **Slow SSH:** Ensure `ControlMaster` is configured in `~/.ssh/config` for
+  persistent connections. The gather script completes in <1s on most hosts.

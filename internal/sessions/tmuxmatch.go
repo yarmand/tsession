@@ -16,7 +16,15 @@ import (
 // Matching by process tree is authoritative: it works even when the tmux
 // session's name and path bear no resemblance to the session's cwd.
 func ResolveTmuxByPID(sess []Session, sd []StateDirInfo, panes []tmux.Pane) []Session {
-	if len(panes) == 0 {
+	ppid := buildProcessTree()
+	if ppid == nil {
+		return sess
+	}
+	return ResolveTmuxByPIDWithTree(sess, sd, panes, ppid)
+}
+
+func ResolveTmuxByPIDWithTree(sess []Session, sd []StateDirInfo, panes []tmux.Pane, processTree map[int]int) []Session {
+	if len(panes) == 0 || len(processTree) == 0 {
 		return sess
 	}
 	pidBySession := map[string]int{}
@@ -34,11 +42,6 @@ func ResolveTmuxByPID(sess []Session, sd []StateDirInfo, panes []tmux.Pane) []Se
 		paneByPID[p.PID] = p
 	}
 
-	ppid := buildProcessTree()
-	if ppid == nil {
-		return sess
-	}
-
 	for i := range sess {
 		if sess[i].TmuxName != "" {
 			continue
@@ -47,7 +50,7 @@ func ResolveTmuxByPID(sess []Session, sd []StateDirInfo, panes []tmux.Pane) []Se
 		if !ok {
 			continue
 		}
-		if pane, ok := walkToPane(pid, ppid, paneByPID); ok {
+		if pane, ok := walkToPane(pid, processTree, paneByPID); ok {
 			sess[i].TmuxName = pane.SessionName
 			sess[i].TmuxTarget = pane.Target()
 		}

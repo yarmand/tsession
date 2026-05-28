@@ -51,9 +51,9 @@ func TestMerge_SortOrder_TmuxFirstThenStatePriority(t *testing.T) {
 	now := time.Now()
 	store := []Session{
 		{ID: "no-tmux-new", CWD: "/x/no1", UpdatedAt: now.Add(-1 * time.Minute)},
-		{ID: "tmux-idle",   CWD: "/x/t1",  UpdatedAt: now.Add(-5 * time.Minute)},
-		{ID: "tmux-work",   CWD: "/x/t2",  UpdatedAt: now.Add(-10 * time.Minute)},
-		{ID: "tmux-wait",   CWD: "/x/t3",  UpdatedAt: now.Add(-20 * time.Minute)},
+		{ID: "tmux-idle", CWD: "/x/t1", UpdatedAt: now.Add(-5 * time.Minute)},
+		{ID: "tmux-work", CWD: "/x/t2", UpdatedAt: now.Add(-10 * time.Minute)},
+		{ID: "tmux-wait", CWD: "/x/t3", UpdatedAt: now.Add(-20 * time.Minute)},
 		{ID: "no-tmux-old", CWD: "/x/no2", UpdatedAt: now.Add(-30 * time.Minute)},
 	}
 	stateDirs := []StateDirInfo{
@@ -87,20 +87,20 @@ func TestMerge_SortOrder_Buckets(t *testing.T) {
 	// Within each bucket, higher state priority wins, then recency.
 	now := time.Now()
 	store := []Session{
-		{ID: "tmux-idle-old",   CWD: "/x/t1",  UpdatedAt: now.Add(-1 * time.Hour)},
-		{ID: "no-tmux-working", CWD: "/x/nw",  UpdatedAt: now.Add(-2 * time.Minute)},
-		{ID: "no-tmux-waiting", CWD: "/x/na",  UpdatedAt: now.Add(-5 * time.Minute)},
-		{ID: "no-tmux-active",  CWD: "/x/ai",  UpdatedAt: now.Add(-3 * time.Minute)},
-		{ID: "no-tmux-recent",  CWD: "/x/nr",  UpdatedAt: now.Add(-1 * time.Minute)},
-		{ID: "no-tmux-exited",  CWD: "/x/ne",  UpdatedAt: now.Add(-10 * time.Minute)},
+		{ID: "tmux-idle-old", CWD: "/x/t1", UpdatedAt: now.Add(-1 * time.Hour)},
+		{ID: "no-tmux-working", CWD: "/x/nw", UpdatedAt: now.Add(-2 * time.Minute)},
+		{ID: "no-tmux-waiting", CWD: "/x/na", UpdatedAt: now.Add(-5 * time.Minute)},
+		{ID: "no-tmux-active", CWD: "/x/ai", UpdatedAt: now.Add(-3 * time.Minute)},
+		{ID: "no-tmux-recent", CWD: "/x/nr", UpdatedAt: now.Add(-1 * time.Minute)},
+		{ID: "no-tmux-exited", CWD: "/x/ne", UpdatedAt: now.Add(-10 * time.Minute)},
 	}
 	stateDirs := []StateDirInfo{
-		{ID: "tmux-idle-old",   State: StateInactiveIdle},
+		{ID: "tmux-idle-old", State: StateInactiveIdle},
 		{ID: "no-tmux-working", State: StateWorking},
 		{ID: "no-tmux-waiting", State: StateWaiting},
-		{ID: "no-tmux-active",  State: StateActiveIdle},
-		{ID: "no-tmux-recent",  State: StateInactiveIdle},
-		{ID: "no-tmux-exited",  State: StateExited},
+		{ID: "no-tmux-active", State: StateActiveIdle},
+		{ID: "no-tmux-recent", State: StateInactiveIdle},
+		{ID: "no-tmux-exited", State: StateExited},
 	}
 	tmuxs := []tmux.Session{
 		{Name: "t1", Path: "/x/t1"},
@@ -131,78 +131,95 @@ func idsOf(ss []Session) []string {
 	return out
 }
 
+func TestMergeRemoteSetsOrigin(t *testing.T) {
+	store := []Session{{ID: "remote-1", CWD: "/x/proj", Origin: "devbox", UpdatedAt: time.Now()}}
+	sd := []StateDirInfo{{ID: "remote-1", State: StateActiveIdle, CWD: "/x/proj"}}
+	tx := []tmux.Session{{Name: "proj", Path: "/x/proj"}}
+
+	got := MergeRemote(store, sd, tx, map[int]int{1: 0})
+	if len(got) != 1 {
+		t.Fatalf("want 1 session, got %d", len(got))
+	}
+	if got[0].Origin != "devbox" {
+		t.Fatalf("want origin devbox, got %q", got[0].Origin)
+	}
+	if got[0].State != StateActiveIdle {
+		t.Fatalf("want active idle without done-state rewrite, got %s", got[0].State)
+	}
+}
+
 func TestMerge_ExitedAlwaysLast_EvenWithTmux(t *testing.T) {
-now := time.Now()
-store := []Session{
-{ID: "exited-tmux",  CWD: "/x/e", UpdatedAt: now.Add(-1 * time.Minute)},
-{ID: "idle-no-tmux", CWD: "/x/i", UpdatedAt: now.Add(-5 * time.Minute)},
-}
-sd := []StateDirInfo{
-{ID: "exited-tmux",  State: StateExited},
-{ID: "idle-no-tmux", State: StateInactiveIdle},
-}
-tx := []tmux.Session{{Name: "e", Path: "/x/e"}}
-got := Merge(store, sd, tx)
-if got[0].ID != "idle-no-tmux" || got[1].ID != "exited-tmux" {
-t.Errorf("want exited last, got %v", idsOf(got))
-}
+	now := time.Now()
+	store := []Session{
+		{ID: "exited-tmux", CWD: "/x/e", UpdatedAt: now.Add(-1 * time.Minute)},
+		{ID: "idle-no-tmux", CWD: "/x/i", UpdatedAt: now.Add(-5 * time.Minute)},
+	}
+	sd := []StateDirInfo{
+		{ID: "exited-tmux", State: StateExited},
+		{ID: "idle-no-tmux", State: StateInactiveIdle},
+	}
+	tx := []tmux.Session{{Name: "e", Path: "/x/e"}}
+	got := Merge(store, sd, tx)
+	if got[0].ID != "idle-no-tmux" || got[1].ID != "exited-tmux" {
+		t.Errorf("want exited last, got %v", idsOf(got))
+	}
 }
 
 func TestMerge_DoneTransitionFromWorkingToActive(t *testing.T) {
-t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
-store := []Session{{ID: "s1", CWD: "/x/s1", UpdatedAt: time.Now()}}
+	store := []Session{{ID: "s1", CWD: "/x/s1", UpdatedAt: time.Now()}}
 
-// First pass: state is working.
-sd := []StateDirInfo{{ID: "s1", State: StateWorking}}
-got := Merge(store, sd, nil)
-if got[0].State != StateWorking {
-t.Fatalf("pass1: want working, got %s", got[0].State)
-}
+	// First pass: state is working.
+	sd := []StateDirInfo{{ID: "s1", State: StateWorking}}
+	got := Merge(store, sd, nil)
+	if got[0].State != StateWorking {
+		t.Fatalf("pass1: want working, got %s", got[0].State)
+	}
 
-// Second pass: state transitions to ActiveIdle → expect Done.
-sd = []StateDirInfo{{ID: "s1", State: StateActiveIdle}}
-got = Merge(store, sd, nil)
-if got[0].State != StateDone {
-t.Fatalf("pass2: want done, got %s", got[0].State)
-}
+	// Second pass: state transitions to ActiveIdle → expect Done.
+	sd = []StateDirInfo{{ID: "s1", State: StateActiveIdle}}
+	got = Merge(store, sd, nil)
+	if got[0].State != StateDone {
+		t.Fatalf("pass2: want done, got %s", got[0].State)
+	}
 
-// Third pass: still ActiveIdle (no transition) → still Done.
-got = Merge(store, sd, nil)
-if got[0].State != StateDone {
-t.Fatalf("pass3: want done sticky, got %s", got[0].State)
-}
+	// Third pass: still ActiveIdle (no transition) → still Done.
+	got = Merge(store, sd, nil)
+	if got[0].State != StateDone {
+		t.Fatalf("pass3: want done sticky, got %s", got[0].State)
+	}
 
-// Fourth pass: state goes back to working → done marker cleared.
-sd = []StateDirInfo{{ID: "s1", State: StateWorking}}
-got = Merge(store, sd, nil)
-if got[0].State != StateWorking {
-t.Fatalf("pass4: want working, got %s", got[0].State)
-}
+	// Fourth pass: state goes back to working → done marker cleared.
+	sd = []StateDirInfo{{ID: "s1", State: StateWorking}}
+	got = Merge(store, sd, nil)
+	if got[0].State != StateWorking {
+		t.Fatalf("pass4: want working, got %s", got[0].State)
+	}
 
-// Fifth pass: back to ActiveIdle → done marker should appear again.
-sd = []StateDirInfo{{ID: "s1", State: StateActiveIdle}}
-got = Merge(store, sd, nil)
-if got[0].State != StateDone {
-t.Fatalf("pass5: want done, got %s", got[0].State)
-}
+	// Fifth pass: back to ActiveIdle → done marker should appear again.
+	sd = []StateDirInfo{{ID: "s1", State: StateActiveIdle}}
+	got = Merge(store, sd, nil)
+	if got[0].State != StateDone {
+		t.Fatalf("pass5: want done, got %s", got[0].State)
+	}
 }
 
 func TestMerge_DoneClearedWhenStateNotIdle(t *testing.T) {
-t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 
-store := []Session{{ID: "s1", CWD: "/x/s1", UpdatedAt: time.Now()}}
+	store := []Session{{ID: "s1", CWD: "/x/s1", UpdatedAt: time.Now()}}
 
-// Working → ActiveIdle = Done.
-Merge(store, []StateDirInfo{{ID: "s1", State: StateWorking}}, nil)
-got := Merge(store, []StateDirInfo{{ID: "s1", State: StateActiveIdle}}, nil)
-if got[0].State != StateDone {
-t.Fatalf("setup: want done, got %s", got[0].State)
-}
+	// Working → ActiveIdle = Done.
+	Merge(store, []StateDirInfo{{ID: "s1", State: StateWorking}}, nil)
+	got := Merge(store, []StateDirInfo{{ID: "s1", State: StateActiveIdle}}, nil)
+	if got[0].State != StateDone {
+		t.Fatalf("setup: want done, got %s", got[0].State)
+	}
 
-// Now state becomes exited → done is cleared, state is exited.
-got = Merge(store, []StateDirInfo{{ID: "s1", State: StateExited}}, nil)
-if got[0].State != StateExited {
-t.Fatalf("want exited, got %s", got[0].State)
-}
+	// Now state becomes exited → done is cleared, state is exited.
+	got = Merge(store, []StateDirInfo{{ID: "s1", State: StateExited}}, nil)
+	if got[0].State != StateExited {
+		t.Fatalf("want exited, got %s", got[0].State)
+	}
 }

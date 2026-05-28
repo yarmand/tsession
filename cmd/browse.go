@@ -10,6 +10,7 @@ import (
 
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/tmux"
+	"github.com/yarma/tsession/internal/sessions"
 )
 
 func Browse(args []string) error {
@@ -24,6 +25,7 @@ func Browse(args []string) error {
 	active := fs.Bool("active", false, "only show sessions attached to tmux with a known, non-exited state")
 	short := fs.Bool("short", false, "compact output: state, age, repo basename, summary truncated to 30 chars")
 	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
+	localOnly := fs.Bool("local-only", false, "only show local sessions")
 	watch := fs.Bool("watch", false, "auto-refresh the list every 5s and keep browsing after each selection")
 	target := fs.String("target", "", "tmux client to switch (/dev/... path, or any value to pick interactively)")
 	_ = fs.Parse(args)
@@ -42,10 +44,19 @@ func Browse(args []string) error {
 	if !*watch {
 		_, err := runFzf(*maxAge, query, false, *active, *short, *lshort, resolvedTarget)
 		return err
+		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort)
+		if err != nil {
+			return err
+		}
+		if id == "" {
+			return nil
+		}
+		return Resume([]string{id})
 	}
 
 	for {
-		selected, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true, resolvedTarget)
+		selected, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true)
+		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true)
 		if err != nil {
 			return err
 		}
@@ -56,6 +67,7 @@ func Browse(args []string) error {
 	}
 }
 
+<<<<<<< HEAD
 // launchInTmux starts a tmux session named "tsession" (in $HOME) and runs
 // tsession browse with the original arguments inside it.
 func launchInTmux(browseArgs []string) error {
@@ -82,11 +94,15 @@ func launchInTmux(browseArgs []string) error {
 	return cmd.Run()
 }
 
+func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool) (string, error) {
+	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false)
+}
+
 func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, target string) (string, error) {
 	return runFzfOpts(maxAge, query, popup, active, short, lshort, false, target)
 }
 
-func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, autoReload bool, target string) (string, error) {
+func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, autoReload bool, localOnly bool, target string) (string, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -100,6 +116,9 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 	}
 	if lshort > 0 {
 		reloadCmd += fmt.Sprintf(" --lshort=%d", lshort)
+	}
+	if localOnly {
+		reloadCmd += " --local-only"
 	}
 
 	useShort := short || lshort > 0
@@ -186,7 +205,7 @@ Keybindings:
 	// Feed the initial session list on stdin so fzf renders immediately
 	// — no fork+exec of `tsession list` between popup open and first paint.
 	// Refresh keeps working via ctrl-r and the popup-mode curl loop.
-	stdin, err := initialListBytes(maxAge, active, short, lshort)
+	stdin, err := initialListBytes(maxAge, active, short, lshort, localOnly)
 	if err != nil {
 		// Non-fatal: fall back to empty stdin + reload-on-start so the
 		// picker still works even if the cache + live load both failed.
@@ -212,60 +231,46 @@ Keybindings:
 
 // initialListBytes renders the fzf-formatted session list in-process,
 // reusing the same cache-first path as `tsession list --fzf`.
-func initialListBytes(maxAge time.Duration, active, short bool, lshort int) (string, error) {
-	merged, err := loadAll(maxAge, false)
+func initialListBytes(maxAge time.Duration, active, short bool, lshort int, localOnly bool) (string, error) {
+	local, remoteMap, remoteNames, warnings, err := loadAllWithRemotes(maxAge, false, localOnly)
 	if err != nil {
 		return "", err
 	}
-	if active {
-		merged = filterActive(merged)
+	for _, warning := range warnings {
+		fmt.Fprintln(os.Stderr, "warning:", warning)
 	}
+	if active {
+		local = filterActive(local)
+		for _, name := range remoteNames {
+			remoteMap[name] = filterActive(remoteMap[name])
+		}
+	}
+
+	all := append([]sessions.Session(nil), local...)
+	for _, name := range remoteNames {
+		all = append(all, remoteMap[name]...)
+	}
+
 	useShort := short || lshort > 0
 	if useShort {
-		enrichOrigins(merged)
+		enrichOrigins(all)
 	}
 	now := time.Now()
 
 	var shortCtx render.ShortContext
 	if useShort {
-		shortCtx = render.BuildShortContext(merged)
+		shortCtx = render.BuildShortContext(all)
 	}
 
 	var b strings.Builder
-	for _, s := range merged {
-		if useShort {
-			line := render.FormatLineShortWithContext(s, now, false, shortCtx, lshort)
-			parts := strings.SplitN(line, "\t", 2)
-			display, id := parts[0], ""
-			if len(parts) == 2 {
-				id = parts[1]
-			}
-
-			ts := s.LastEventAt
-			if ts.IsZero() {
-				ts = s.UpdatedAt
-			}
-			age := render.FormatAge(now.Sub(ts))
-			summary := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " "), "\t", " ")
-			if summary == "" {
-				summary = "(no summary)"
-			}
-
-			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				display,
-				id,
-				s.Repository,
-				s.CWD,
-				render.OriginShortName(s.Repository),
-				s.State.String(),
-				age,
-				summary,
-				shortCtx.LegendField(),
-			)
-		} else {
-			b.WriteString(render.FormatLine(s, now, false))
-			b.WriteByte('\n')
-		}
+	hasRemotes := len(remoteNames) > 0
+	if hasRemotes {
+		printSectionDivider(&b, "Local", false, true, lshort)
+	}
+	renderSessionList(&b, local, now, false, true, useShort, shortCtx, lshort)
+	for _, name := range remoteNames {
+		printSectionDivider(&b, name, false, true, lshort)
+		renderSessionList(&b, remoteMap[name], now, false, true, useShort, shortCtx, lshort)
 	}
 	return b.String(), nil
 }

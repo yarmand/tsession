@@ -104,7 +104,7 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 		"--footer= ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
 		"--footer-border=none",
 		"--color=footer:blue:bold",
-		"--bind=enter:execute-silent(" + shellQuote(self) + " resume {2})",
+		enterBinding(self),
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
 		"--bind=ctrl-e:execute-silent(" + shellQuote(self) + " vscode {2})",
 		"--bind=?:preview(echo " + shellQuote(helpText) + ")",
@@ -230,6 +230,16 @@ func asExit(err error, target **exec.ExitError) bool {
 		return true
 	}
 	return false
+}
+
+// enterBinding returns the fzf --bind for the enter key.
+// Inside tmux it switches to the selected session; outside tmux it simply
+// accepts the selection and exits (attach cannot work without a tmux client).
+func enterBinding(self string) string {
+	if tmux.InTmux() {
+		return "--bind=enter:execute-silent(" + shellQuote(self) + " resume {2})+accept"
+	}
+	return "--bind=enter:accept"
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quotes,

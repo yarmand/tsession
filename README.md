@@ -30,6 +30,8 @@ tsession list [flags]         # print recent sessions to stdout
 tsession browse [flags] [q]   # fzf picker in current terminal
 tsession popup [flags]        # fzf picker designed for tmux popup
 tsession resume <session-id>  # switch tmux pane (or fall back to `copilot --resume`)
+tsession rename <session-id> [name]  # rename a session (interactive if no name given)
+tsession vscode <session-id>  # open session directory in VS Code
 tsession watch [--daemon]     # refresh ~/.tsession/cache.json every --interval (default 10s)
 tsession stop-watch           # stop the running watcher
 ```
@@ -48,6 +50,29 @@ tsession stop-watch           # stop the running watcher
 | `--watch`           | (browse only) Auto-refresh the list every 5s and re-open the picker after each selection. `ESC` exits. |
 
 Sort order: pinned to bucket (`exited` always last; otherwise `tmux-attached` → `active no-tmux` → `idle`), then by state priority, then by recency.
+
+## Browse keybindings
+
+When using `browse` or `popup`, the following keybindings are available:
+
+| Key      | Action                                                                 |
+|----------|------------------------------------------------------------------------|
+| `enter`  | Switch to the selected session (tmux switch-client)                    |
+| `ctrl-e` | Open the session's working directory in VS Code                        |
+| `ctrl-n` | Rename the session (opens in tmux popup when inside tmux)              |
+| `ctrl-r` | Reload the session list                                                |
+| `?`      | Show keybinding help in the preview pane                               |
+| `esc`/`q`| Exit the picker                                                        |
+
+No keybinding exits the picker except `esc`/`q` — all commands keep the list visible.
+
+## Session names
+
+Sessions can be given custom display names via `ctrl-n` in the picker or `tsession rename <id> [name]`. Names are stored in `~/.tsession/names.json` and shown in the `NAME` column instead of the repository/CWD path.
+
+When a session has a corresponding tmux session, renaming also renames the tmux session to keep them in sync.
+
+To clear a name, rename with an empty string.
 
 ## Background cache (`watch`)
 

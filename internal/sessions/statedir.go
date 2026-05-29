@@ -368,12 +368,15 @@ func classifyFromEvents(evs []parsedEvent) (State, bool) {
 		case "tool.user_requested":
 			return StateWaiting, false
 		case "tool.execution_start":
+			if isUserPromptingTool(e.ToolName) {
+				// User-prompting tools block until the user responds.
+				// A completion from a sibling parallel tool (e.g.
+				// report_intent) does not satisfy this, so check first.
+				return StateWaiting, false
+			}
 			if completed > 0 {
 				completed--
 				continue
-			}
-			if isUserPromptingTool(e.ToolName) {
-				return StateWaiting, false
 			}
 		}
 	}

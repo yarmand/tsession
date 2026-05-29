@@ -40,6 +40,13 @@ func TestLoadStateDir_InfersStateFromLastEvent(t *testing.T) {
 			turnStart,
 			`{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:01.000Z","data":{"toolName":"ask_user"}}`,
 		}, StateWaiting},
+		// Parallel tools: report_intent completes but ask_user is still pending.
+		{"u-wait-parallel", []string{
+			turnStart,
+			`{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:01.000Z","data":{"toolName":"report_intent"}}`,
+			`{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:01.000Z","data":{"toolName":"ask_user"}}`,
+			`{"type":"tool.execution_complete","timestamp":"2026-05-17T10:00:01.100Z","data":{}}`,
+		}, StateWaiting},
 		{"u-perm", []string{
 			turnStart,
 			`{"type":"tool.user_requested","timestamp":"2026-05-17T10:00:01.000Z"}`,

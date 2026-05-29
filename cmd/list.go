@@ -158,7 +158,7 @@ func filterActive(in []sessions.Session) []sessions.Session {
 		if s.TmuxName == "" {
 			continue
 		}
-		if s.State == sessions.StateExited || s.State == sessions.StateUnknown {
+		if s.State == sessions.StateExited || s.State == sessions.StateUnknown || s.State == sessions.StateInactiveIdle {
 			continue
 		}
 		out = append(out, s)

@@ -124,6 +124,16 @@ func loadAllLive(maxAge time.Duration) ([]sessions.Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load session store: %w", err)
 	}
+
+	// Build a set of known IDs from the DB, then discover live sessions
+	// that haven't appeared in the DB yet (brand-new, no interaction).
+	knownIDs := make(map[string]bool, len(store))
+	for _, s := range store {
+		knownIDs[s.ID] = true
+	}
+	live := sessions.DiscoverLiveSessions(stateRoot, knownIDs)
+	store = append(store, live...)
+
 	ids := make([]string, len(store))
 	for i, s := range store {
 		ids[i] = s.ID

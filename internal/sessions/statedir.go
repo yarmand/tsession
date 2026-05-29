@@ -100,7 +100,10 @@ func LoadStateDirsForIDs(root string, ids []string) ([]StateDirInfo, error) {
 				evs, ok := tailRecentEvents(filepath.Join(dir, "events.jsonl"))
 				p := partial{idx: i, dbPath: filepath.Join(dir, "session.db")}
 				if !ok {
+					// No events yet — fall through to lsof/PID check to
+					// determine if the session is live (brand-new) or idle.
 					info.State = StateUnknown
+					p.needsLsof = true
 					p.info = info
 					results[i] = p
 					continue
@@ -143,6 +146,10 @@ func LoadStateDirsForIDs(root string, ids []string) ([]StateDirInfo, error) {
 		if r.needsLsof {
 			if locked[r.dbPath] {
 				r.info.DBLocked = true
+				r.info.State = StateActiveIdle
+			} else if r.info.PID > 0 {
+				// No session.db lock, but inuse.<pid>.lock exists — the
+				// session is live (brand-new, no interaction yet).
 				r.info.State = StateActiveIdle
 			} else {
 				r.info.State = StateInactiveIdle
@@ -233,6 +240,42 @@ func parseEventLine(line string) (string, string, time.Time, bool) {
 	}
 	t, _ := time.Parse(time.RFC3339Nano, e.Timestamp)
 	return e.Type, e.Data.ToolName, t.UTC(), true
+}
+
+// DiscoverLiveSessions finds session-state directories that have an
+// inuse.<pid>.lock file but are NOT in the provided known set. This catches
+// brand-new sessions that haven't yet appeared in session-store.db.
+// Uses filepath.Glob for a single-pass scan rather than per-dir ReadDir.
+func DiscoverLiveSessions(root string, knownIDs map[string]bool) []Session {
+	pattern := filepath.Join(root, "*", "inuse.*.lock")
+	matches, err := filepath.Glob(pattern)
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+
+	var out []Session
+	for _, lockPath := range matches {
+		dir := filepath.Dir(lockPath)
+		id := filepath.Base(dir)
+		if knownIDs[id] {
+			continue
+		}
+		// Deduplicate if multiple lock files exist in the same dir.
+		knownIDs[id] = true
+
+		cwd := readWorkspaceCWD(filepath.Join(dir, "workspace.yaml"))
+		var updatedAt time.Time
+		if info, err := os.Stat(dir); err == nil {
+			updatedAt = info.ModTime().UTC()
+		}
+
+		out = append(out, Session{
+			ID:        id,
+			CWD:       cwd,
+			UpdatedAt: updatedAt,
+		})
+	}
+	return out
 }
 
 // readInusePID looks for an `inuse.<pid>.lock` file in dir and returns the

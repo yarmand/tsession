@@ -350,11 +350,17 @@ func classifyFromEvents(evs []parsedEvent) (State, bool) {
 	// Walk from the most recent event backward looking for an unmatched
 	// user-prompting tool.execution_start, a tool.user_requested prompt,
 	// or a permission.requested that has not yet been completed.
+	// Stop at the most recent turn_end — events before it are history.
 	completed := 0
 	permCompleted := 0
+	promptingStarts := 0
 	for i := len(evs) - 1; i >= 0; i-- {
 		e := evs[i]
 		switch e.Type {
+		case "assistant.turn_end":
+			// Crossed into a previous turn — tool events before here
+			// don't reflect current state.
+			goto turnCheck
 		case "tool.execution_complete":
 			completed++
 		case "permission.completed":
@@ -370,15 +376,22 @@ func classifyFromEvents(evs []parsedEvent) (State, bool) {
 		case "tool.execution_start":
 			if isUserPromptingTool(e.ToolName) {
 				// User-prompting tools block until the user responds.
-				// A completion from a sibling parallel tool (e.g.
-				// report_intent) does not satisfy this, so check first.
-				return StateWaiting, false
+				// Each prompting start needs its own dedicated completion.
+				// Completions for sibling non-prompting tools don't count.
+				promptingStarts++
+				continue
 			}
 			if completed > 0 {
 				completed--
 				continue
 			}
 		}
+	}
+turnCheck:
+	// If there are unmatched prompting starts, check if enough completions
+	// remain (after satisfying non-prompting tools) to cover them.
+	if promptingStarts > 0 && completed < promptingStarts {
+		return StateWaiting, false
 	}
 
 	var lastStart, lastEnd time.Time

@@ -47,6 +47,18 @@ func TestLoadStateDir_InfersStateFromLastEvent(t *testing.T) {
 			`{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:01.000Z","data":{"toolName":"ask_user"}}`,
 			`{"type":"tool.execution_complete","timestamp":"2026-05-17T10:00:01.100Z","data":{}}`,
 		}, StateWaiting},
+		// Parallel tools answered: both complete, turn ends, new turn ends idle.
+		{"u-idle-parallel-answered", []string{
+			turnStart,
+			`{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:01.000Z","data":{"toolName":"report_intent"}}`,
+			`{"type":"tool.execution_start","timestamp":"2026-05-17T10:00:01.000Z","data":{"toolName":"ask_user"}}`,
+			`{"type":"tool.execution_complete","timestamp":"2026-05-17T10:00:01.100Z","data":{}}`,
+			`{"type":"tool.execution_complete","timestamp":"2026-05-17T10:00:05.000Z","data":{}}`,
+			`{"type":"assistant.turn_end","timestamp":"2026-05-17T10:00:06.000Z"}`,
+			`{"type":"assistant.turn_start","timestamp":"2026-05-17T10:00:06.100Z"}`,
+			`{"type":"assistant.message","timestamp":"2026-05-17T10:00:07.000Z"}`,
+			`{"type":"assistant.turn_end","timestamp":"2026-05-17T10:00:07.100Z"}`,
+		}, StateInactiveIdle},
 		{"u-perm", []string{
 			turnStart,
 			`{"type":"tool.user_requested","timestamp":"2026-05-17T10:00:01.000Z"}`,

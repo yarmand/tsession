@@ -108,7 +108,7 @@ Keybindings:
 		"--header-first",
 		"--prompt=session> ",
 		"--border=none",
-		"--footer= ●working ◐question ✓done ○active ·idle | ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
+		"--footer= ●working ◐question ✓done ○active ·idle\n ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
 		"--footer-border=none",
 		"--color=footer:blue:bold",
 		enterBinding(self),

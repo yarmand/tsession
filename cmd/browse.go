@@ -75,7 +75,14 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 		}
 	}
 
-	helpText := `Keybindings:
+	helpText := `States:
+  ● working    Agent is executing tools
+  ◐ question   Waiting for your input
+  ✓ done       Just finished working
+  ○ active     Live session, idle
+  · idle       No live process
+
+Keybindings:
   enter     Switch to session
   ctrl-e    Open in VS Code
   ctrl-n    Rename session
@@ -101,7 +108,7 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 		"--header-first",
 		"--prompt=session> ",
 		"--border=none",
-		"--footer= ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
+		"--footer= ●working ◐question ✓done ○active ·idle | ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
 		"--footer-border=none",
 		"--color=footer:blue:bold",
 		enterBinding(self),

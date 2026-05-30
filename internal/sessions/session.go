@@ -44,4 +44,5 @@ type Session struct {
 	TmuxName    string
 	TmuxTarget  string
 	Name        string // user-defined display name (from ~/.tsession/names.json)
+	Source      string // "copilot" or "pi"
 }

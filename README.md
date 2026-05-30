@@ -131,24 +131,52 @@ Create `~/.config/tsession/config.yaml`:
 
 ```yaml
 remotes:
-  - name: devbox          # Section label in the picker
-    host: devbox.local    # SSH host (as in ~/.ssh/config or user@host)
+  # Plain SSH remote
+  - name: devbox
+    host: devbox.local
+
+  # SSH with custom path
   - name: server
     host: user@server.example.com
-    copilot_dir: /home/user/.copilot  # Optional, defaults to ~/.copilot
-  - name: codespace
-    ssh_command: gh codespace ssh      # Custom SSH command (default: "ssh")
+    copilot_dir: /home/user/.copilot
+
+  # GitHub Codespace
+  - name: my-codespace
+    type: codespace
+    codespace: urban-broccoli-abc123
+
+  # Dev container (Docker)
+  - name: my-container
+    type: devcontainer
+    container: myapp_devcontainer
+    user: vscode
+
+  # Custom SSH command (advanced)
+  - name: custom
+    ssh_command: my-ssh-wrapper
+    host: target-host
 ```
+
+#### Remote types
+
+| Type | Fields | Connect command |
+|------|--------|----------------|
+| `ssh` (default) | `host`, optional `ssh_command` | `ssh <host> ...` |
+| `codespace` | `codespace` (name) | `gh codespace ssh --codespace <name> ...` |
+| `devcontainer` | `container`, `user` | `docker exec -u <user> <container> ...` |
+
+#### All fields
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `name` | yes | — | Label shown in the section header |
-| `host` | no* | — | SSH destination (user@host or ssh-config alias) |
-| `ssh_command` | no | `ssh` | Command used to connect (supports multi-word, e.g. `gh codespace ssh`) |
+| `type` | no | `ssh` | Remote type: `ssh`, `codespace`, or `devcontainer` |
+| `host` | type=ssh | — | SSH destination (user@host or ssh-config alias) |
+| `ssh_command` | no | `ssh` | Custom SSH binary/command (type=ssh only) |
+| `codespace` | type=codespace | — | Codespace name (from `gh codespace list`) |
+| `container` | type=devcontainer | — | Docker container name |
+| `user` | type=devcontainer | — | User inside the container (e.g. `vscode`) |
 | `copilot_dir` | no | `~/.copilot` | Path to Copilot state on the remote |
-
-\* Either `host` or `ssh_command` must be set. When `ssh_command` is a custom tool
-like `gh codespace ssh`, the `host` field can be omitted if the tool doesn't need one.
 
 **Requirements on the remote:**
 - `bash` and `sqlite3` must be available in PATH
@@ -172,9 +200,10 @@ JSON in a single SSH round-trip. Each remote appears as its own section:
 
 ### Resume behavior
 
-Selecting a remote session opens an interactive SSH connection:
-- If the session is attached to a tmux pane: `ssh -t <host> tmux attach -t <target>`
-- Otherwise: `ssh -t <host> copilot --resume=<id>`
+Selecting a remote session opens an interactive connection:
+- **ssh**: `ssh -t <host> tmux attach -t <target>` or `copilot --resume=<id>`
+- **codespace**: `gh codespace ssh --codespace <name> -t -- tmux attach -t <target>`
+- **devcontainer**: `docker exec -it -u <user> <container> tmux attach -t <target>`
 
 ### Flags
 

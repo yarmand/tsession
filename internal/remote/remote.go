@@ -81,37 +81,24 @@ func Fetch(ctx context.Context, remote config.Remote, maxAge time.Duration) (*Ga
 	}
 	hours := maxAgeHours(maxAge)
 
-	sshCmd := remote.SSHCommand
-	if sshCmd == "" {
-		sshCmd = "ssh"
-	}
+	bin, args := remote.GatherCommand()
+	args = append(args, "bash", "-s", "--", shellQuote(copilotDir), fmt.Sprintf("%d", hours))
 
-	// Split the ssh command to support multi-word commands like "gh codespace ssh"
-	sshParts := strings.Fields(sshCmd)
-	baseArgs := sshParts[1:]
-
-	remoteCmd := fmt.Sprintf("bash -s -- %s %d", shellQuote(copilotDir), hours)
-
-	// For plain ssh, add BatchMode and ConnectTimeout options
-	if sshParts[0] == "ssh" {
-		baseArgs = append(baseArgs, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
-	}
-	if remote.Host != "" {
-		baseArgs = append(baseArgs, remote.Host)
-	}
-	baseArgs = append(baseArgs, remoteCmd)
-
-	cmd := exec.CommandContext(ctx, sshParts[0], baseArgs...)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdin = strings.NewReader(gatherScript)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		label := remote.Name
+		if remote.Host != "" {
+			label = remote.Host
+		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
-			return nil, fmt.Errorf("%s %s: %w: %s", sshCmd, remote.Host, err, msg)
+			return nil, fmt.Errorf("%s %s: %w: %s", bin, label, err, msg)
 		}
-		return nil, fmt.Errorf("%s %s: %w", sshCmd, remote.Host, err)
+		return nil, fmt.Errorf("%s %s: %w", bin, label, err)
 	}
 	return ParseGatherOutput(stdout.Bytes())
 }

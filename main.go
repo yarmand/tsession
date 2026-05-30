@@ -52,9 +52,11 @@ func usage() {
 
 Usage:
   tsession list                List recent sessions (text)
-  tsession browse [query]      fzf picker (no popup)
-  tsession popup               fzf picker designed for tmux popup
-  tsession resume <session-id> Switch tmux to session, or copilot --resume
+  tsession browse [flags] [q]  fzf picker (auto-launches tmux if outside)
+  tsession popup [flags]       fzf picker designed for tmux popup
+  tsession resume [--target=..] <session-id>  Switch tmux to session
+  tsession rename <session-id> [name]         Rename a session
+  tsession vscode <session-id> Open session directory in VS Code
   tsession watch [--daemon]    Refresh ~/.tsession/cache.json every --interval (default 10s)
   tsession stop-watch          Stop a running watch process
   tsession -h                  Show this help`)

@@ -46,6 +46,14 @@ func Resume(args []string) error {
 		return nil
 	}
 
+	// Pi session without tmux match: use `pi --session`
+	if match != nil && match.Source == "pi" {
+		cmd := exec.Command("pi", "--session", id)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return cmd.Run()
+	}
+
+	// Copilot session without tmux match: use `copilot --resume`
 	if _, err := exec.LookPath("copilot"); err != nil {
 		fmt.Println(id)
 		return nil

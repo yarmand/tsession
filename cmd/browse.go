@@ -13,12 +13,19 @@ import (
 )
 
 func Browse(args []string) error {
+	// If not inside tmux, launch a new tmux session named 'tsession' and
+	// re-exec ourselves inside it with the same arguments.
+	if !tmux.InTmux() {
+		return launchInTmux(args)
+	}
+
 	fs := flag.NewFlagSet("browse", flag.ExitOnError)
 	maxAge := fs.Duration("max-age", 14*24*time.Hour, "ignore sessions older than this")
 	active := fs.Bool("active", false, "only show sessions attached to tmux with a known, non-exited state")
 	short := fs.Bool("short", false, "compact output: state, age, repo basename, summary truncated to 30 chars")
 	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
 	watch := fs.Bool("watch", false, "auto-refresh the list every 5s and keep browsing after each selection")
+	target := fs.String("target", "", "tmux client to switch: 'last', /dev/... path, or session name")
 	_ = fs.Parse(args)
 	query := strings.Join(fs.Args(), " ")
 
@@ -27,12 +34,12 @@ func Browse(args []string) error {
 	}
 
 	if !*watch {
-		_, err := runFzf(*maxAge, query, false, *active, *short, *lshort)
+		_, err := runFzf(*maxAge, query, false, *active, *short, *lshort, *target)
 		return err
 	}
 
 	for {
-		selected, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true)
+		selected, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true, *target)
 		if err != nil {
 			return err
 		}
@@ -43,11 +50,37 @@ func Browse(args []string) error {
 	}
 }
 
-func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int) (string, error) {
-	return runFzfOpts(maxAge, query, popup, active, short, lshort, false)
+// launchInTmux starts a tmux session named "tsession" (in $HOME) and runs
+// tsession browse with the original arguments inside it.
+func launchInTmux(browseArgs []string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	// Build the command to run inside tmux: tsession browse <original args>
+	tmuxCmd := shellQuote(self) + " browse"
+	for _, a := range browseArgs {
+		tmuxCmd += " " + shellQuote(a)
+	}
+
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/"
+	}
+
+	// Create or attach to a tmux session named "tsession", running our command.
+	// Use new-session with -A to attach if it already exists.
+	cmd := exec.Command("tmux", "new-session", "-A", "-s", "tsession", "-c", home, tmuxCmd)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
-func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, autoReload bool) (string, error) {
+func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, target string) (string, error) {
+	return runFzfOpts(maxAge, query, popup, active, short, lshort, false, target)
+}
+
+func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, autoReload bool, target string) (string, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -111,7 +144,7 @@ Keybindings:
 		"--footer= ●working ◐question ✓done ○active ·idle\n ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
 		"--footer-border=none",
 		"--color=footer:blue:bold",
-		enterBinding(self),
+		enterBinding(self, target),
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
 		"--bind=ctrl-e:execute-silent(" + shellQuote(self) + " vscode {2})",
 		"--bind=?:preview(echo " + shellQuote(helpText) + ")",
@@ -242,9 +275,14 @@ func asExit(err error, target **exec.ExitError) bool {
 // enterBinding returns the fzf --bind for the enter key.
 // Inside tmux it switches to the selected session; outside tmux it simply
 // accepts the selection and exits (attach cannot work without a tmux client).
-func enterBinding(self string) string {
+func enterBinding(self, target string) string {
 	if tmux.InTmux() {
-		return "--bind=enter:execute-silent(" + shellQuote(self) + " resume {2})+accept"
+		resumeCmd := shellQuote(self) + " resume"
+		if target != "" {
+			resumeCmd += " --target=" + shellQuote(target)
+		}
+		resumeCmd += " {2}"
+		return "--bind=enter:execute-silent(" + resumeCmd + ")+accept"
 	}
 	return "--bind=enter:accept"
 }

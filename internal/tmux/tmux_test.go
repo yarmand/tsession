@@ -24,3 +24,41 @@ func TestParseListSessions_EmptyAndBlankLines(t *testing.T) {
 		t.Errorf("want empty, got %+v", got)
 	}
 }
+
+func TestResolveTarget_Empty(t *testing.T) {
+	got, err := ResolveTarget("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("want empty, got %q", got)
+	}
+}
+
+func TestResolveTarget_DevPath(t *testing.T) {
+	got, err := ResolveTarget("/dev/ttys003")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "/dev/ttys003" {
+		t.Errorf("want /dev/ttys003, got %q", got)
+	}
+}
+
+func TestSplitNonEmpty(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"\n\n", 0},
+		{"/dev/ttys001\n/dev/ttys002\n", 2},
+		{"  /dev/ttys001  \n", 1},
+	}
+	for _, tc := range cases {
+		got := splitNonEmpty(tc.in)
+		if len(got) != tc.want {
+			t.Errorf("splitNonEmpty(%q): want %d items, got %d", tc.in, tc.want, len(got))
+		}
+	}
+}

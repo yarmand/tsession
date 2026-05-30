@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,10 +13,14 @@ import (
 )
 
 func Resume(args []string) error {
-	if len(args) < 1 {
-		return errors.New("usage: tsession resume <session-id>")
+	fs := flag.NewFlagSet("resume", flag.ExitOnError)
+	target := fs.String("target", "", "tmux client to switch: 'last', /dev/... path, or session name")
+	_ = fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		return fmt.Errorf("usage: tsession resume [--target=...] <session-id>")
 	}
-	id := args[0]
+	id := fs.Arg(0)
 
 	merged, err := loadAll(14*24*time.Hour, false)
 	if err != nil {
@@ -31,11 +35,11 @@ func Resume(args []string) error {
 	}
 
 	if match != nil && (match.TmuxTarget != "" || match.TmuxName != "") {
-		target := match.TmuxTarget
-		if target == "" {
-			target = match.TmuxName
+		tmuxTarget := match.TmuxTarget
+		if tmuxTarget == "" {
+			tmuxTarget = match.TmuxName
 		}
-		if err := tmux.SwitchClient(target); err != nil {
+		if err := tmux.SwitchClientTarget(tmuxTarget, *target); err != nil {
 			return err
 		}
 		_ = donestate.Clear(id)

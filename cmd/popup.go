@@ -13,7 +13,7 @@ func Popup(args []string) error {
 	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
 	_ = fs.Parse(args)
 
-	id, err := runFzf(*maxAge, "", true, *active, *short, *lshort)
+	id, err := runFzf(*maxAge, "", true, *active, *short, *lshort, "")
 	if err != nil {
 		return err
 	}

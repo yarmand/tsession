@@ -106,7 +106,19 @@ remotes:
   - name: server
     host: user@server.example.com
     copilot_dir: /home/user/.copilot  # Optional, defaults to ~/.copilot
+  - name: codespace
+    ssh_command: gh codespace ssh      # Custom SSH command (default: "ssh")
 ```
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | yes | — | Label shown in the section header |
+| `host` | no* | — | SSH destination (user@host or ssh-config alias) |
+| `ssh_command` | no | `ssh` | Command used to connect (supports multi-word, e.g. `gh codespace ssh`) |
+| `copilot_dir` | no | `~/.copilot` | Path to Copilot state on the remote |
+
+\* Either `host` or `ssh_command` must be set. When `ssh_command` is a custom tool
+like `gh codespace ssh`, the `host` field can be omitted if the tool doesn't need one.
 
 **Requirements on the remote:**
 - `bash` and `sqlite3` must be available in PATH

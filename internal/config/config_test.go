@@ -15,6 +15,8 @@ func TestLoadRemotes(t *testing.T) {
   - name: server
     host: user@server.example.com
     copilot_dir: /home/user/.copilot
+  - name: codespace
+    ssh_command: gh codespace ssh
 `), 0o644)
 	if err != nil {
 		t.Fatal(err)
@@ -24,8 +26,8 @@ func TestLoadRemotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Remotes) != 2 {
-		t.Fatalf("got %d remotes, want 2", len(cfg.Remotes))
+	if len(cfg.Remotes) != 3 {
+		t.Fatalf("got %d remotes, want 3", len(cfg.Remotes))
 	}
 	if cfg.Remotes[0].Name != "devbox" {
 		t.Errorf("remote[0].Name = %q, want devbox", cfg.Remotes[0].Name)
@@ -36,8 +38,17 @@ func TestLoadRemotes(t *testing.T) {
 	if cfg.Remotes[0].CopilotDir != "~/.copilot" {
 		t.Errorf("remote[0].CopilotDir = %q, want ~/.copilot (default)", cfg.Remotes[0].CopilotDir)
 	}
+	if cfg.Remotes[0].SSHCommand != "ssh" {
+		t.Errorf("remote[0].SSHCommand = %q, want ssh (default)", cfg.Remotes[0].SSHCommand)
+	}
 	if cfg.Remotes[1].CopilotDir != "/home/user/.copilot" {
 		t.Errorf("remote[1].CopilotDir = %q, want /home/user/.copilot", cfg.Remotes[1].CopilotDir)
+	}
+	if cfg.Remotes[2].SSHCommand != "gh codespace ssh" {
+		t.Errorf("remote[2].SSHCommand = %q, want 'gh codespace ssh'", cfg.Remotes[2].SSHCommand)
+	}
+	if cfg.Remotes[2].Host != "" {
+		t.Errorf("remote[2].Host = %q, want empty", cfg.Remotes[2].Host)
 	}
 }
 

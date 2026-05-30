@@ -42,9 +42,7 @@ func Browse(args []string) error {
 	}
 
 	if !*watch {
-		_, err := runFzf(*maxAge, query, false, *active, *short, *lshort, resolvedTarget)
-		return err
-		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort)
+		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort, *localOnly, resolvedTarget)
 		if err != nil {
 			return err
 		}
@@ -61,14 +59,12 @@ func Browse(args []string) error {
 			return err
 		}
 		// User pressed esc/ctrl-q — fzf exited with 130, no selection made.
-		if selected == "" {
+		if id == "" {
 			return nil
 		}
 	}
 }
 
-// launchInTmux starts a tmux session named "session-nav" (in $HOME) and runs
-<<<<<<< HEAD
 // launchInTmux starts a tmux session named "tsession" (in $HOME) and runs
 // tsession browse with the original arguments inside it.
 func launchInTmux(browseArgs []string) error {

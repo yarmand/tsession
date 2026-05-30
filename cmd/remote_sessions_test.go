@@ -161,11 +161,19 @@ func TestInitialListBytes_IncludesSectionDividers(t *testing.T) {
 }
 
 func TestRemoteResumeArgs(t *testing.T) {
-	if got, want := remoteResumeArgs(sessions.Session{ID: "abc", TmuxTarget: "main:1.0"}, "devbox"), []string{"ssh", "-t", "devbox", "tmux attach -t main:1.0"}; !reflect.DeepEqual(got, want) {
+	defaultRemote := config.Remote{Name: "devbox", Host: "devbox", SSHCommand: "ssh"}
+
+	if got, want := remoteResumeArgs(sessions.Session{ID: "abc", TmuxTarget: "main:1.0"}, defaultRemote), []string{"ssh", "-t", "devbox", "tmux attach -t main:1.0"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("tmux args = %v, want %v", got, want)
 	}
-	if got, want := remoteResumeArgs(sessions.Session{ID: "abc"}, "devbox"), []string{"ssh", "-t", "devbox", "copilot --resume=abc"}; !reflect.DeepEqual(got, want) {
+	if got, want := remoteResumeArgs(sessions.Session{ID: "abc"}, defaultRemote), []string{"ssh", "-t", "devbox", "copilot --resume=abc"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("copilot args = %v, want %v", got, want)
+	}
+
+	// Custom ssh_command (e.g. gh codespace ssh)
+	csRemote := config.Remote{Name: "cs", Host: "", SSHCommand: "gh codespace ssh"}
+	if got, want := remoteResumeArgs(sessions.Session{ID: "abc", TmuxTarget: "main:1.0"}, csRemote), []string{"gh", "codespace", "ssh", "-t", "tmux attach -t main:1.0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("codespace tmux args = %v, want %v", got, want)
 	}
 }
 

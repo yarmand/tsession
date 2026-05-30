@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
+	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/donestate"
 	"github.com/yarma/tsession/internal/sessions"
 	"github.com/yarma/tsession/internal/tmux"
@@ -40,11 +42,11 @@ func Resume(args []string) error {
 	}
 
 	if match != nil && match.Origin != "" {
-		host, err := remoteHost(match.Origin)
+		remote, err := remoteHost(match.Origin)
 		if err != nil {
 			return err
 		}
-		args := remoteResumeArgs(*match, host)
+		args := remoteResumeArgs(*match, remote)
 		cmd := execCommand(args[0], args[1:]...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
@@ -79,7 +81,7 @@ func Resume(args []string) error {
 	return cmd.Run()
 }
 
-func remoteResumeArgs(s sessions.Session, host string) []string {
+func remoteResumeArgs(s sessions.Session, remote config.Remote) []string {
 	target := s.TmuxTarget
 	if target == "" {
 		target = s.TmuxName
@@ -88,7 +90,19 @@ func remoteResumeArgs(s sessions.Session, host string) []string {
 	if target != "" {
 		remoteCmd = "tmux attach -t " + target
 	}
-	return []string{"ssh", "-t", host, remoteCmd}
+
+	sshCmd := remote.SSHCommand
+	if sshCmd == "" {
+		sshCmd = "ssh"
+	}
+	sshParts := strings.Fields(sshCmd)
+	args := append([]string{}, sshParts...)
+	args = append(args, "-t")
+	if remote.Host != "" {
+		args = append(args, remote.Host)
+	}
+	args = append(args, remoteCmd)
+	return args
 }
 
 func findSessionByID(all []sessions.Session, id string) *sessions.Session {
@@ -100,18 +114,18 @@ func findSessionByID(all []sessions.Session, id string) *sessions.Session {
 	return nil
 }
 
-func remoteHost(origin string) (string, error) {
+func remoteHost(origin string) (config.Remote, error) {
 	cfg, err := loadConfig()
 	if err != nil {
-		return "", err
+		return config.Remote{}, err
 	}
 	for _, remote := range cfg.Remotes {
 		if remote.Name == origin {
-			if remote.Host == "" {
+			if remote.Host == "" && remote.SSHCommand == "" {
 				break
 			}
-			return remote.Host, nil
+			return remote, nil
 		}
 	}
-	return "", fmt.Errorf("remote %q not configured", origin)
+	return config.Remote{}, fmt.Errorf("remote %q not configured", origin)
 }

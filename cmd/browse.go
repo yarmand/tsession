@@ -25,7 +25,7 @@ func Browse(args []string) error {
 	short := fs.Bool("short", false, "compact output: state, age, repo basename, summary truncated to 30 chars")
 	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
 	watch := fs.Bool("watch", false, "auto-refresh the list every 5s and keep browsing after each selection")
-	target := fs.String("target", "", "tmux client to switch: 'last', /dev/... path, or session name")
+	target := fs.String("target", "", "tmux client to switch (/dev/... path, or any value to pick interactively)")
 	_ = fs.Parse(args)
 	query := strings.Join(fs.Args(), " ")
 
@@ -33,13 +33,19 @@ func Browse(args []string) error {
 		return fmt.Errorf("fzf not found in PATH (brew install fzf)")
 	}
 
+	// Resolve target once at startup so the picker doesn't re-prompt on every selection.
+	resolvedTarget, err := tmux.ResolveTarget(*target)
+	if err != nil {
+		return err
+	}
+
 	if !*watch {
-		_, err := runFzf(*maxAge, query, false, *active, *short, *lshort, *target)
+		_, err := runFzf(*maxAge, query, false, *active, *short, *lshort, resolvedTarget)
 		return err
 	}
 
 	for {
-		selected, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true, *target)
+		selected, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true, resolvedTarget)
 		if err != nil {
 			return err
 		}

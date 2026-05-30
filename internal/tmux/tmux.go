@@ -79,7 +79,8 @@ func SwitchClientTarget(name, clientTarget string) error {
 
 // ResolveTarget resolves a --target value into a tmux client path.
 // Returns empty string if target is empty (meaning "current client").
-// Accepts: "" (current), "last" (last client), "/dev/..." (literal), or a session name.
+// If target is a "/dev/..." path, it's used directly.
+// Any other value triggers an interactive picker from tmux list-clients.
 func ResolveTarget(target string) (string, error) {
 	if target == "" {
 		return "", nil
@@ -87,15 +88,13 @@ func ResolveTarget(target string) (string, error) {
 	if strings.HasPrefix(target, "/dev/") {
 		return target, nil
 	}
-	if target == "last" {
-		return lastClient()
-	}
-	// Treat as session name — find the client attached to it.
-	return clientForSession(target)
+	// Any other value (e.g. "pick", "?") triggers interactive selection.
+	return pickClient()
 }
 
-func lastClient() (string, error) {
-	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_tty}").Output()
+// pickClient shows tmux clients and lets the user choose one via fzf.
+func pickClient() (string, error) {
+	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_tty} #{session_name}").Output()
 	if err != nil {
 		return "", fmt.Errorf("list-clients failed: %w", err)
 	}
@@ -103,20 +102,31 @@ func lastClient() (string, error) {
 	if len(lines) == 0 {
 		return "", fmt.Errorf("no tmux clients found")
 	}
-	// Return the last client in the list (most recently active).
-	return lines[len(lines)-1], nil
-}
+	if len(lines) == 1 {
+		// Only one client — use it directly.
+		return strings.Fields(lines[0])[0], nil
+	}
 
-func clientForSession(sessionName string) (string, error) {
-	out, err := exec.Command("tmux", "list-clients", "-t", sessionName, "-F", "#{client_tty}").Output()
+	// Use fzf if available, otherwise just pick the first non-current client.
+	fzfPath, fzfErr := exec.LookPath("fzf")
+	if fzfErr != nil {
+		// No fzf — return first client.
+		return strings.Fields(lines[0])[0], nil
+	}
+
+	input := strings.Join(lines, "\n")
+	cmd := exec.Command(fzfPath, "--prompt=target client> ", "--no-info", "--reverse")
+	cmd.Stdin = strings.NewReader(input)
+	cmd.Stderr = os.Stderr
+	selected, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("no client attached to session %q: %w", sessionName, err)
+		return "", fmt.Errorf("fzf cancelled")
 	}
-	lines := splitNonEmpty(string(out))
-	if len(lines) == 0 {
-		return "", fmt.Errorf("no client attached to session %q", sessionName)
+	fields := strings.Fields(strings.TrimSpace(string(selected)))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("no client selected")
 	}
-	return lines[0], nil
+	return fields[0], nil
 }
 
 func splitNonEmpty(s string) []string {

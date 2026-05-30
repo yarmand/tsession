@@ -14,7 +14,7 @@ import (
 
 func Resume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ExitOnError)
-	target := fs.String("target", "", "tmux client to switch: 'last', /dev/... path, or session name")
+	target := fs.String("target", "", "tmux client to switch (/dev/... path, or any value to pick interactively)")
 	_ = fs.Parse(args)
 
 	if fs.NArg() < 1 {

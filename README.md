@@ -29,7 +29,7 @@ make install            # builds and installs to ~/.local/bin/tsession
 tsession list [flags]         # print recent sessions to stdout
 tsession browse [flags] [q]   # fzf picker in current terminal
 tsession popup [flags]        # fzf picker designed for tmux popup
-tsession resume <session-id>  # switch tmux pane (or fall back to `copilot --resume`)
+tsession resume [--target=..] <session-id>  # switch tmux pane (or fall back to `copilot --resume`)
 tsession rename <session-id> [name]  # rename a session (interactive if no name given)
 tsession vscode <session-id>  # open session directory in VS Code
 tsession watch [--daemon]     # refresh ~/.tsession/cache.json every --interval (default 10s)
@@ -48,6 +48,9 @@ tsession stop-watch           # stop the running watcher
 | `--fzf`             | (list only) Tab-delimited output for fzf consumption (display + selection ID).                       |
 | `--no-cache`        | (list only) Skip the watcher cache and load live.                                                    |
 | `--watch`           | (browse only) Auto-refresh the list every 5s and re-open the picker after each selection. `ESC` exits. |
+| `--target <value>`  | (browse, resume) Switch a different tmux client instead of the current one. Pass a `/dev/...` client path directly, or any other value (e.g. `pick`) to choose interactively from `tmux list-clients` via fzf. |
+
+If `browse` is started outside tmux, it automatically creates (or attaches to) a tmux session named `tsession` in `$HOME` and re-runs itself inside it.
 
 Sort order: pinned to bucket (`exited` always last; otherwise `tmux-attached` → `active no-tmux` → `idle`), then by state priority, then by recency.
 

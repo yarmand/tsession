@@ -14,6 +14,7 @@ type Remote struct {
 	Name       string
 	Host       string
 	CopilotDir string
+	SSHCommand string // e.g. "gh codespace ssh" — defaults to "ssh"
 }
 
 type Config struct {
@@ -69,6 +70,7 @@ func parse(s string) (*Config, error) {
 			current = &Remote{
 				Name:       extractValue(trimmed[len("- name:"):]),
 				CopilotDir: defaultCopilotDir,
+				SSHCommand: "ssh",
 			}
 			continue
 		}
@@ -80,6 +82,10 @@ func parse(s string) (*Config, error) {
 			case strings.HasPrefix(trimmed, "copilot_dir:"):
 				if v := extractValue(trimmed[len("copilot_dir:"):]); v != "" {
 					current.CopilotDir = v
+				}
+			case strings.HasPrefix(trimmed, "ssh_command:"):
+				if v := extractValue(trimmed[len("ssh_command:"):]); v != "" {
+					current.SSHCommand = v
 				}
 			}
 		}

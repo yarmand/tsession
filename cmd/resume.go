@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/yarma/tsession/internal/config"
@@ -91,18 +90,10 @@ func remoteResumeArgs(s sessions.Session, remote config.Remote) []string {
 		remoteCmd = "tmux attach -t " + target
 	}
 
-	sshCmd := remote.SSHCommand
-	if sshCmd == "" {
-		sshCmd = "ssh"
-	}
-	sshParts := strings.Fields(sshCmd)
-	args := append([]string{}, sshParts...)
-	args = append(args, "-t")
-	if remote.Host != "" {
-		args = append(args, remote.Host)
-	}
-	args = append(args, remoteCmd)
-	return args
+	bin, args := remote.ResumeCommand()
+	result := append([]string{bin}, args...)
+	result = append(result, remoteCmd)
+	return result
 }
 
 func findSessionByID(all []sessions.Session, id string) *sessions.Session {
@@ -121,10 +112,23 @@ func remoteHost(origin string) (config.Remote, error) {
 	}
 	for _, remote := range cfg.Remotes {
 		if remote.Name == origin {
-			if remote.Host == "" && remote.SSHCommand == "" {
-				break
+			switch remote.Type {
+			case "codespace":
+				if remote.Codespace == "" {
+					break
+				}
+				return remote, nil
+			case "devcontainer":
+				if remote.Container == "" {
+					break
+				}
+				return remote, nil
+			default:
+				if remote.Host == "" && remote.SSHCommand == "" {
+					break
+				}
+				return remote, nil
 			}
-			return remote, nil
 		}
 	}
 	return config.Remote{}, fmt.Errorf("remote %q not configured", origin)

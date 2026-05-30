@@ -1,19 +1,26 @@
 # tsession
 
-Manage [Copilot CLI](https://github.com/github/copilot-cli) sessions from tmux.
+Manage [Copilot CLI](https://github.com/github/copilot-cli) and [pi](https://github.com/earendil-works/pi-mono) sessions from tmux.
 
-`tsession` joins four data sources:
+`tsession` joins multiple data sources:
+
+**Copilot CLI:**
 - `~/.copilot/session-store.db` — recent sessions (id, summary, timestamps)
 - `~/.copilot/session-state/<uuid>/workspace.yaml` — authoritative `cwd` per session
 - `~/.copilot/session-state/<uuid>/events.jsonl` — live state (working / waiting / idle / exited)
 - `~/.copilot/session-state/<uuid>/inuse.<pid>.lock` — owning Copilot PID
+
+**pi:**
+- `~/.tsession/pi-state/<uuid>.json` — state written by the pi extension (working / question / done / idle / exited)
+
+**tmux:**
 - `tmux list-sessions` / `tmux list-panes` — matches sessions to tmux panes:
   1. PID-based: walk the owning PID's ancestor chain until it matches a pane PID (authoritative)
   2. Fallback: match `basename(cwd)` against tmux session name
 
-Resume uses the matched `session:window.pane` target so the exact pane hosting the Copilot session is focused, not just the tmux session.
+Resume uses the matched `session:window.pane` target so the exact pane hosting the session is focused, not just the tmux session.
 
-The picker switches your tmux client to the matching pane on Enter; if there is no tmux match, it falls back to `copilot --resume <id>`.
+The picker switches your tmux client to the matching pane on Enter; if there is no tmux match, it falls back to `copilot --resume <id>` (Copilot) or `pi --session <id>` (pi).
 
 ## Install
 
@@ -22,6 +29,16 @@ Requires Go 1.25+, `tmux`, `fzf`, `lsof`.
 ```bash
 make install            # builds and installs to ~/.local/bin/tsession
 ```
+
+### Pi extension
+
+To track pi session state, install the bundled extension:
+
+```bash
+cp extension/pi/tsession-state.ts ~/.pi/agent/extensions/
+```
+
+Then reload pi (or restart it). The extension writes state to `~/.tsession/pi-state/` automatically on every session lifecycle event.
 
 ## Usage
 
@@ -112,9 +129,16 @@ for the full session list.
 
 | Glyph | State    | Meaning                                                                |
 |-------|----------|------------------------------------------------------------------------|
-| ●     | working  | last event was `tool.execution_start` (non-prompting tool) / `agent.processing` |
-| ◐     | question | last event was `tool.execution_start` for `ask_user`/`ask_question`, or a permission request |
-| ✓     | done     | session just transitioned from `working` to `active`; cleared the first time you switch to its tmux pane |
-| ○     | active   | `session.db` held open by a live copilot process                       |
+| ●     | working  | agent is processing (Copilot: tool execution; pi: turn in progress)    |
+| ◐     | question | agent finished with a question (Copilot: `ask_user`; pi: last message ends with `?`) |
+| ✓     | done     | agent finished; cleared on pane switch                                 |
+| ○     | active   | session open, waiting for user input                                   |
 | ·     | idle     | no live process, no shutdown event                                     |
-| ·     | exited   | `session.shutdown` event in `events.jsonl`                             |
+| ·     | exited   | session shut down                                                      |
+
+### Source indicators
+
+| Prefix | Source |
+|--------|--------|
+| ©      | Copilot CLI |
+| π      | pi     |

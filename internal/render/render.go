@@ -38,6 +38,7 @@ func FormatLineShortWithContext(s sessions.Session, now time.Time, color bool, c
 		glyph = colorize(s.State, glyph)
 	}
 
+	src := sourceGlyph(s.Source)
 	letter := ctx.letterForOrigin(s.Repository)
 	name := shortWorktreeName(s)
 	repoCol := name
@@ -50,7 +51,8 @@ func FormatLineShortWithContext(s sessions.Session, now time.Time, color bool, c
 		summary = "(no summary)"
 	}
 
-	prefix := "  " + glyph + " " + padRight(truncate(repoCol, 24), 24) + " "
+	nameWidth := 24
+	prefix := "  " + src + glyph + " " + padRight(truncate(repoCol, nameWidth), nameWidth) + " "
 	suffix := " " + age
 
 	// Default summary truncation in --short (when not using --lshort)
@@ -59,12 +61,31 @@ func FormatLineShortWithContext(s sessions.Session, now time.Time, color bool, c
 		return display + "\t" + s.ID
 	}
 
+	// With lshort: shrink name column if prefix+suffix already exceeds budget
+	for len([]rune(prefix))+len([]rune(suffix)) > lshort && nameWidth > 1 {
+		nameWidth--
+		prefix = "  " + src + glyph + " " + padRight(truncate(repoCol, nameWidth), nameWidth) + " "
+	}
+
 	budget := lshort - len([]rune(prefix)) - len([]rune(suffix))
 	if budget < 0 {
 		budget = 0
 	}
 	display := prefix + truncate(summary, budget) + suffix
+	// Final safety: hard-cap at lshort
+	if r := []rune(display); len(r) > lshort {
+		display = string(r[:lshort])
+	}
 	return display + "\t" + s.ID
+}
+
+func sourceGlyph(source string) string {
+	switch source {
+	case "pi":
+		return "π"
+	default:
+		return "©"
+	}
 }
 
 func formatLineLong(s sessions.Session, now time.Time, color bool) string {
@@ -73,6 +94,7 @@ func formatLineLong(s sessions.Session, now time.Time, color bool) string {
 		ts = s.UpdatedAt
 	}
 	age := FormatAge(now.Sub(ts))
+	src := sourceGlyph(s.Source)
 	state := s.State.String()
 	if color {
 		state = colorize(s.State, padRight(stateGlyph(s.State)+state, 9))
@@ -95,8 +117,8 @@ func formatLineLong(s sessions.Session, now time.Time, color bool) string {
 	if tmux == "" {
 		tmux = "-"
 	}
-	display := fmt.Sprintf("  %s %-5s %-16s %-30s %-80s  %s",
-		state, age,
+	display := fmt.Sprintf("  %s%s %-5s %-16s %-30s %-80s  %s",
+		src, state, age,
 		truncate(tmux, 16),
 		truncate(repo, 30),
 		truncate(summary, 80),

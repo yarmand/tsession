@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/yarma/tsession/internal/cache"
+	"github.com/yarma/tsession/internal/pisessions"
 	"github.com/yarma/tsession/internal/sessions"
 	"github.com/yarma/tsession/internal/tmux"
 )
@@ -149,6 +150,33 @@ func loadAllLive(maxAge time.Duration) ([]sessions.Session, error) {
 	panes, _ := tmux.ListPanes()
 	merged := sessions.Merge(store, sd, tx)
 	merged = sessions.ResolveTmuxByPID(merged, sd, panes)
+
+	// Mark Copilot sessions
+	for i := range merged {
+		if merged[i].Source == "" {
+			merged[i].Source = "copilot"
+		}
+	}
+
+	// Load pi sessions
+	piSessions, piErr := pisessions.LoadAll()
+	if piErr != nil {
+		fmt.Fprintln(os.Stderr, "warning: pi session load failed:", piErr)
+	} else if len(piSessions) > 0 {
+		cutoff := time.Now().Add(-maxAge)
+		var piFiltered []sessions.Session
+		for _, ps := range piSessions {
+			if !ps.UpdatedAt.IsZero() && ps.UpdatedAt.Before(cutoff) {
+				continue
+			}
+			piFiltered = append(piFiltered, ps)
+		}
+		// PID-based tmux matching for pi sessions
+		piSD := pisessions.StateDirInfos(piFiltered)
+		piFiltered = sessions.ResolveTmuxByPID(piFiltered, piSD, panes)
+		merged = append(merged, piFiltered...)
+	}
+
 	return merged, nil
 }
 

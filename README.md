@@ -1,120 +1,38 @@
 # tsession
 
-Manage [Copilot CLI](https://github.com/github/copilot-cli) and [pi](https://github.com/earendil-works/pi-mono) sessions from tmux.
-
-`tsession` joins multiple data sources:
-
-**Copilot CLI:**
-- `~/.copilot/session-store.db` — recent sessions (id, summary, timestamps)
-- `~/.copilot/session-state/<uuid>/workspace.yaml` — authoritative `cwd` per session
-- `~/.copilot/session-state/<uuid>/events.jsonl` — live state (working / waiting / idle / exited)
-- `~/.copilot/session-state/<uuid>/inuse.<pid>.lock` — owning Copilot PID
-
-**pi:**
-- `~/.tsession/pi-state/<uuid>.json` — state written by the pi extension (working / question / done / idle / exited)
-
-**tmux:**
-- `tmux list-sessions` / `tmux list-panes` — matches sessions to tmux panes:
-  1. PID-based: walk the owning PID's ancestor chain until it matches a pane PID (authoritative)
-  2. Fallback: match `basename(cwd)` against tmux session name
-
-Resume uses the matched `session:window.pane` target so the exact pane hosting the session is focused, not just the tmux session.
-
-The picker switches your tmux client to the matching pane on Enter; if there is no tmux match, it falls back to `copilot --resume <id>` (Copilot) or `pi --session <id>` (pi).
+A session navigator for [Copilot CLI](https://github.com/github/copilot-cli) and [pi](https://github.com/earendil-works/pi-mono) — browse, switch, and monitor your AI coding sessions from tmux.
 
 ## Install
 
 Requires Go 1.25+, `tmux`, `fzf`, `lsof`.
 
 ```bash
-make install            # builds and installs to ~/.local/bin/tsession
+make install    # builds and installs to ~/.local/bin/tsession
 ```
 
-### Pi extension
+## Browse — session navigation in a terminal split
 
-To track pi session state, install the bundled extension:
+The primary workflow: use your terminal's native split to create two panes side by side. The left pane runs tsession as a persistent navigator; the right pane has a tmux client where your sessions live.
 
+![browse](browse.png)
+
+Before yo start tsession, use your native terminal split capabilities. the the split you want to display session, start a tmux session. This session is only here the tsession to easily discover the TTY.
+In the split youwant the navigation, start tsession with:
 ```bash
-cp extension/pi/tsession-state.ts ~/.pi/agent/extensions/
+tsession browse --watch --active --short --target pick
 ```
 
-Then reload pi (or restart it). The extension writes state to `~/.tsession/pi-state/` automatically on every session lifecycle event.
+On first launch, tsession asks you to pick which tmux client to target (the right pane). Then it shows a live-updating fzf list of active sessions. Press `enter` to switch the target pane to that session.
 
-## Usage
+The `--watch` flag keeps the picker open and refreshes every 5 seconds — it acts as a persistent session dashboard. Press `esc` to quit.
 
-```bash
-tsession list [flags]         # print recent sessions to stdout
-tsession browse [flags] [q]   # fzf picker in current terminal
-tsession popup [flags]        # fzf picker designed for tmux popup
-tsession resume [--target=..] <session-id>  # switch tmux pane (or fall back to `copilot --resume`)
-tsession rename <session-id> [name]  # rename a session (interactive if no name given)
-tsession vscode <session-id>  # open session directory in VS Code
-tsession watch [--daemon]     # refresh ~/.tsession/cache.json every --interval (default 10s)
-tsession stop-watch           # stop the running watcher
-```
+If started outside tmux, browse auto-creates a tmux session named `session-nav` and re-runs inside it.
 
-### Common flags (`list`, `browse`, `popup`)
+## Popup — quick switcher from any tmux pane
 
-| Flag                | Description                                                                                          |
-|---------------------|------------------------------------------------------------------------------------------------------|
-| `--max-age <dur>`   | Ignore sessions older than this (default `336h` = 14 days).                                          |
-| `--active`          | Only show sessions attached to tmux whose state is neither `exited` nor `unknown`.                   |
-| `--short`           | Compact rendering: state glyph, `originLetter-basename(cwd)`, summary (30 chars), age suffix. In `browse`/`popup`, shows a right-side preview with an origin legend. |
-| `--lshort <n>`      | Implies `--short`; additionally truncate each display line to `n` characters (preserves the age suffix). Disables color. |
-| `--no-color`        | (list only) Disable ANSI colors.                                                                     |
-| `--fzf`             | (list only) Tab-delimited output for fzf consumption (display + selection ID).                       |
-| `--no-cache`        | (list only) Skip the watcher cache and load live.                                                    |
-| `--watch`           | (browse only) Auto-refresh the list every 5s and re-open the picker after each selection. `ESC` exits. |
-| `--target <value>`  | (browse, resume) Switch a different tmux client instead of the current one. Pass a `/dev/...` client path directly, or any other value (e.g. `pick`) to choose interactively via fzf at startup. The chosen target is used for all subsequent selections. |
+For quick access without a dedicated split, bind tsession as a tmux popup:
 
-If `browse` is started outside tmux, it automatically creates (or attaches to) a tmux session named `tsession` in `$HOME` and re-runs itself inside it.
-
-Sort order: pinned to bucket (`exited` always last; otherwise `tmux-attached` → `active no-tmux` → `idle`), then by state priority, then by recency.
-
-## Browse keybindings
-
-When using `browse` or `popup`, the following keybindings are available:
-
-| Key      | Action                                                                 |
-|----------|------------------------------------------------------------------------|
-| `enter`  | Switch to the selected session (tmux switch-client)                    |
-| `ctrl-e` | Open the session's working directory in VS Code                        |
-| `ctrl-n` | Rename the session (opens in tmux popup when inside tmux)              |
-| `ctrl-r` | Reload the session list                                                |
-| `?`      | Show keybinding help in the preview pane                               |
-| `esc`/`q`| Exit the picker                                                        |
-
-No keybinding exits the picker except `esc`/`q` — all commands keep the list visible.
-
-## Session names
-
-Sessions can be given custom display names via `ctrl-n` in the picker or `tsession rename <id> [name]`. Names are stored in `~/.tsession/names.json` and shown in the `NAME` column instead of the repository/CWD path.
-
-When a session has a corresponding tmux session, renaming also renames the tmux session to keep them in sync.
-
-To clear a name, rename with an empty string.
-
-## Background cache (`watch`)
-
-A live load typically completes in well under 300 ms (≈200 ms with
-~50 recent sessions), so `list`/`browse`/`popup` are snappy without any
-extra setup. For sub-10 ms reads — e.g. a tmux popup that re-renders on
-every keystroke — run a background watcher that maintains a cache file:
-
-```bash
-tsession watch --daemon                 # interval=10s, logs to ~/.tsession/watch.log
-tsession watch --daemon --interval=5s   # custom interval
-tsession stop-watch                     # stop it
-```
-
-When the cache file at `~/.tsession/cache.json` is within `2 × interval` of
-now, `list`/`browse`/`popup` use it directly. Otherwise they fall back to a
-live load, so a crashed or stale watcher never silently lies. Pass
-`--no-cache` to `list` to force a live load. The watcher is **not**
-auto-started; run `tsession watch --daemon` once per session if you want
-the cache.
-
-## tmux popup keybind
+![popup](popup.png)
 
 Add to `~/.tmux.conf`:
 
@@ -122,23 +40,36 @@ Add to `~/.tmux.conf`:
 bind -n M-s display-popup -E -w 90% -h 70% "tsession popup --active --short"
 ```
 
-Then `Alt-s` opens the picker from any tmux pane. Drop `--active --short`
-for the full session list.
+Then `Alt-s` opens the picker as an overlay from any pane. Select a session and the popup closes, switching you there.
 
-## State legend
+## Keybindings
 
-| Glyph | State    | Meaning                                                                |
-|-------|----------|------------------------------------------------------------------------|
-| ●     | working  | agent is processing (Copilot: tool execution; pi: turn in progress)    |
-| ◐     | question | agent finished with a question (Copilot: `ask_user`; pi: last message ends with `?`) |
-| ✓     | done     | agent finished; cleared on pane switch                                 |
-| ○     | active   | session open, waiting for user input                                   |
-| ·     | idle     | no live process, no shutdown event                                     |
-| ·     | exited   | session shut down                                                      |
+| Key | Action |
+|-----|--------|
+| `enter` | Switch to the selected session |
+| `ctrl-e` | Open session directory in VS Code |
+| `ctrl-n` | Rename the session |
+| `ctrl-r` | Reload the session list |
+| `?` | Show help in the preview pane |
+| `esc`/`q` | Exit the picker |
 
-### Source indicators
+## Source indicators
 
 | Prefix | Source |
 |--------|--------|
-| ©      | Copilot CLI |
-| π      | pi     |
+| © | Copilot CLI |
+| π | pi |
+
+## State indicators
+
+| Glyph | Meaning |
+|-------|---------|
+| ● | Agent is processing |
+| ◐ | Agent finished with a question |
+| ✓ | Agent finished (cleared on pane switch) |
+| ○ | Waiting for user input |
+| · | Idle or exited |
+
+---
+
+See [AGENTS.md](AGENTS.md) for technical internals, full flag reference, and cache architecture.

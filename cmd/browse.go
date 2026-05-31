@@ -13,7 +13,7 @@ import (
 )
 
 func Browse(args []string) error {
-	// If not inside tmux, launch a new tmux session named 'tsession' and
+	// If not inside tmux, launch a new tmux session named 'session-nav' and
 	// re-exec ourselves inside it with the same arguments.
 	if !tmux.InTmux() {
 		return launchInTmux(args)
@@ -56,7 +56,7 @@ func Browse(args []string) error {
 	}
 }
 
-// launchInTmux starts a tmux session named "tsession" (in $HOME) and runs
+// launchInTmux starts a tmux session named "session-nav" (in $HOME) and runs
 // tsession browse with the original arguments inside it.
 func launchInTmux(browseArgs []string) error {
 	self, err := os.Executable()
@@ -77,7 +77,7 @@ func launchInTmux(browseArgs []string) error {
 
 	// Create or attach to a tmux session named "tsession", running our command.
 	// Use new-session with -A to attach if it already exists.
-	cmd := exec.Command("tmux", "new-session", "-A", "-s", "tsession", "-c", home, tmuxCmd)
+	cmd := exec.Command("tmux", "new-session", "-A", "-s", "session-nav", "-c", home, tmuxCmd)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }

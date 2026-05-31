@@ -5,8 +5,8 @@ COPILOT_DIR="${1:-~/.copilot}"
 MAX_AGE_HOURS="${2:-336}"
 
 case "$COPILOT_DIR" in
-  ~) COPILOT_DIR="$HOME" ;;
-  ~/*) COPILOT_DIR="$HOME/${COPILOT_DIR#~/}" ;;
+  "~") COPILOT_DIR="$HOME" ;;
+  "~/"*) COPILOT_DIR="$HOME/${COPILOT_DIR#"~/"}" ;;
 esac
 
 DB="$COPILOT_DIR/session-store.db"

@@ -60,7 +60,7 @@ func TestGatherResultToSessions(t *testing.T) {
 			CWD:        "/work/demo",
 			Repository: "git@github.com:yarma/demo.git",
 			Summary:    "demo session",
-			UpdatedAt:  "2026-05-17T10:00:00Z",
+			UpdatedAt:  time.Now().UTC().Format(time.RFC3339),
 		}},
 		StateDirs: []GatherStateDir{{
 			ID:  "s1",

@@ -53,8 +53,7 @@ func Browse(args []string) error {
 	}
 
 	for {
-		selected, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, true)
-		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true)
+		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true, resolvedTarget)
 		if err != nil {
 			return err
 		}
@@ -91,15 +90,11 @@ func launchInTmux(browseArgs []string) error {
 	return cmd.Run()
 }
 
-func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool) (string, error) {
-	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false)
+func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, target string) (string, error) {
+	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false, target)
 }
 
-func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, target string) (string, error) {
-	return runFzfOpts(maxAge, query, popup, active, short, lshort, false, target)
-}
-
-func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, autoReload bool, localOnly bool, target string) (string, error) {
+func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, autoReload bool, target string) (string, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", err

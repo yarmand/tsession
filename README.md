@@ -71,5 +71,13 @@ Then `Alt-s` opens the picker as an overlay from any pane. Select a session and 
 | · | Idle or exited |
 
 ---
-
 See [AGENTS.md](AGENTS.md) for technical internals, full flag reference, and cache architecture.
+
+
+# Coming soon
+
+- remote sessions support
+  - ssh
+  - github codespaces
+  - devcontainers
+

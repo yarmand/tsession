@@ -131,7 +131,7 @@ func assignByTitle(sessions []Session, panes []tmux.Pane) {
 			if usedPanes[j] {
 				continue
 			}
-			if matchTitle(pane.Title, sessions[i].Summary) {
+			if MatchTitle(pane.Title, sessions[i].Summary) {
 				sessions[i].TmuxName = pane.SessionName
 				sessions[i].TmuxTarget = pane.Target()
 				usedPanes[j] = true
@@ -141,9 +141,9 @@ func assignByTitle(sessions []Session, panes []tmux.Pane) {
 	}
 }
 
-// matchTitle checks if a pane title matches a session summary.
+// MatchTitle checks if a pane title matches a session summary.
 // The pane title may have emoji prefix (e.g. "🤖 ") added by copilot.
-func matchTitle(title, summary string) bool {
+func MatchTitle(title, summary string) bool {
 	if title == "" || summary == "" {
 		return false
 	}

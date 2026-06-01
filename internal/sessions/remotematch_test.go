@@ -20,8 +20,8 @@ func TestMatchTitle(t *testing.T) {
 		{"Short", "Short", true},
 	}
 	for _, tt := range tests {
-		if got := matchTitle(tt.title, tt.summary); got != tt.want {
-			t.Errorf("matchTitle(%q, %q) = %v, want %v", tt.title, tt.summary, got, tt.want)
+		if got := MatchTitle(tt.title, tt.summary); got != tt.want {
+			t.Errorf("MatchTitle(%q, %q) = %v, want %v", tt.title, tt.summary, got, tt.want)
 		}
 	}
 }

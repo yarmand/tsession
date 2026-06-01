@@ -41,7 +41,20 @@ func Resume(args []string) error {
 	}
 
 	if match != nil && match.Origin != "" {
-		// Remote session: if we found a local tmux pane for it, switch to it.
+		// Remote session: resolve local tmux pane by matching pane title to summary.
+		// The cache doesn't store this (panes are dynamic), so we resolve at resume time.
+		if match.TmuxTarget == "" && match.Summary != "" {
+			if panes, err := listPanesWithTitleFn(); err == nil && len(panes) > 0 {
+				for _, p := range panes {
+					if sessions.MatchTitle(p.Title, match.Summary) {
+						match.TmuxTarget = p.Target()
+						match.TmuxName = p.SessionName
+						break
+					}
+				}
+			}
+		}
+		// If we found a local tmux pane, switch to it (instant).
 		if match.TmuxTarget != "" || match.TmuxName != "" {
 			tmuxTarget := match.TmuxTarget
 			if tmuxTarget == "" {

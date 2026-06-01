@@ -18,12 +18,29 @@ var execCommand = exec.Command
 func Resume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ExitOnError)
 	target := fs.String("target", "", "tmux client to switch (/dev/... path, or any value to pick interactively)")
+	summary := fs.String("summary", "", "session summary (for instant remote pane matching)")
 	_ = fs.Parse(args)
 
 	if fs.NArg() < 1 {
 		return fmt.Errorf("usage: tsession resume [--target=...] <session-id>")
 	}
 	id := fs.Arg(0)
+
+	// Fast path: if summary is provided, try instant pane switching by title match.
+	// This avoids loading sessions entirely — just check local tmux panes.
+	if *summary != "" {
+		if panes, err := listPanesWithTitleFn(); err == nil && len(panes) > 0 {
+			for _, p := range panes {
+				if sessions.MatchTitle(p.Title, *summary) {
+					if err := tmux.SwitchClientTarget(p.Target(), *target); err != nil {
+						return err
+					}
+					_ = donestate.Clear(id)
+					return nil
+				}
+			}
+		}
+	}
 
 	local, err := loadAll(14*24*time.Hour, true)
 	if err != nil {

@@ -61,15 +61,15 @@ func ResolveRemotePanes(remoteSessions map[string][]Session, panes []tmux.Pane, 
 			continue
 		}
 
-		if len(panesForRemote) == 1 && len(sessions) == 1 {
-			// 1:1 match — assign directly.
+		if len(sessions) == 1 {
+			// Single session — assign the first matching pane regardless of title.
 			sessions[0].TmuxName = panesForRemote[0].SessionName
 			sessions[0].TmuxTarget = panesForRemote[0].Target()
 			remoteSessions[remoteName] = sessions
 			continue
 		}
 
-		// Multiple panes or sessions — match by pane title vs session summary.
+		// Multiple sessions — match by pane title vs session summary.
 		assignByTitle(sessions, panesForRemote)
 		remoteSessions[remoteName] = sessions
 	}

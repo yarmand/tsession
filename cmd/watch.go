@@ -117,6 +117,9 @@ func refresh(interval, maxAge time.Duration) error {
 		for _, warning := range warnings {
 			fmt.Fprintln(os.Stderr, "warning:", warning)
 		}
+		// Resolve remote sessions to local tmux panes so the cache
+		// stores TmuxTarget for instant switching on resume.
+		remoteMap = resolveRemotePanes(cfg.Remotes, remoteMap)
 		for _, r := range cfg.Remotes {
 			if s, ok := remoteMap[r.Name]; ok {
 				allSessions = append(allSessions, s...)

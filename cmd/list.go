@@ -119,7 +119,7 @@ func renderSessionList(w io.Writer, list []sessions.Session, now time.Time, colo
 				if summary == "" {
 					summary = "(no summary)"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					display,
 					id,
 					s.Repository,
@@ -129,6 +129,7 @@ func renderSessionList(w io.Writer, list []sessions.Session, now time.Time, colo
 					age,
 					summary,
 					shortCtx.LegendField(),
+					s.Origin,
 				)
 			} else {
 				fmt.Fprintln(w, display)

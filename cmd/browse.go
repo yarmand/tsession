@@ -284,8 +284,9 @@ func enterBinding(self, target string) string {
 		if target != "" {
 			resumeCmd += " --target=" + shellQuote(target)
 		}
-		// {8} is session summary; fzf shell-quotes field replacements automatically.
-		resumeCmd += " --summary {8} {2}"
+		// {10} is session origin (remote name), {8} is summary.
+		// fzf shell-quotes field replacements automatically.
+		resumeCmd += " --origin {10} --summary {8} {2}"
 		return "--bind=enter:execute-silent(" + resumeCmd + ")+accept"
 	}
 	return "--bind=enter:accept"

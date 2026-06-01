@@ -161,25 +161,40 @@ func TestInitialListBytes_IncludesSectionDividers(t *testing.T) {
 }
 
 func TestRemoteResumeArgs(t *testing.T) {
-	// Default ssh type
+	// SSH with existing tmux target — just attach
 	sshRemote := config.Remote{Name: "devbox", Host: "devbox", Type: "ssh"}
-	if got, want := remoteResumeArgs(sessions.Session{ID: "abc", TmuxTarget: "main:1.0"}, sshRemote), []string{"ssh", "-t", "devbox", "tmux attach -t main:1.0"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("ssh tmux args = %v, want %v", got, want)
-	}
-	if got, want := remoteResumeArgs(sessions.Session{ID: "abc"}, sshRemote), []string{"ssh", "-t", "devbox", "copilot --resume=abc"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("ssh copilot args = %v, want %v", got, want)
+	if got, want := remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234", TmuxTarget: "main:1.0"}, sshRemote), []string{"ssh", "-t", "devbox", "tmux attach -t main:1.0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ssh tmux attach = %v, want %v", got, want)
 	}
 
-	// Codespace type
+	// SSH without tmux target — create persistent tmux session
+	got := remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, sshRemote)
+	want := []string{"ssh", "-t", "devbox", "tmux new-session -As tsession-abcdefgh 'copilot --resume=abcdefgh-1234'"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ssh new tmux = %v, want %v", got, want)
+	}
+
+	// Codespace with tmux target
 	csRemote := config.Remote{Name: "cs", Type: "codespace", Codespace: "my-cs"}
-	if got, want := remoteResumeArgs(sessions.Session{ID: "abc", TmuxTarget: "main:1.0"}, csRemote), []string{"gh", "codespace", "ssh", "--codespace", "my-cs", "-t", "--", "tmux attach -t main:1.0"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("codespace tmux args = %v, want %v", got, want)
+	if got, want := remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234", TmuxTarget: "main:1.0"}, csRemote), []string{"gh", "codespace", "ssh", "--codespace", "my-cs", "-t", "--", "tmux attach -t main:1.0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("codespace tmux attach = %v, want %v", got, want)
 	}
 
-	// Devcontainer type
+	// Codespace without tmux target — try tmux, fall back to direct
+	got = remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, csRemote)
+	want = []string{"gh", "codespace", "ssh", "--codespace", "my-cs", "-t", "--",
+		"tmux new-session -As tsession-abcdefgh 'copilot --resume=abcdefgh-1234' 2>/dev/null || copilot --resume=abcdefgh-1234"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("codespace fallback = %v, want %v", got, want)
+	}
+
+	// Devcontainer without tmux target — try tmux, fall back to direct
 	dcRemote := config.Remote{Name: "dc", Type: "devcontainer", Container: "myapp", User: "vscode"}
-	if got, want := remoteResumeArgs(sessions.Session{ID: "abc"}, dcRemote), []string{"docker", "exec", "-it", "-u", "vscode", "myapp", "copilot --resume=abc"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("devcontainer args = %v, want %v", got, want)
+	got = remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, dcRemote)
+	want = []string{"docker", "exec", "-it", "-u", "vscode", "myapp",
+		"tmux new-session -As tsession-abcdefgh 'copilot --resume=abcdefgh-1234' 2>/dev/null || copilot --resume=abcdefgh-1234"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("devcontainer fallback = %v, want %v", got, want)
 	}
 }
 

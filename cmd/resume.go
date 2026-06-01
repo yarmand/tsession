@@ -85,9 +85,26 @@ func remoteResumeArgs(s sessions.Session, remote config.Remote) []string {
 	if target == "" {
 		target = s.TmuxName
 	}
-	remoteCmd := "copilot --resume=" + s.ID
+
+	var remoteCmd string
 	if target != "" {
+		// Session already has a tmux pane — just attach.
 		remoteCmd = "tmux attach -t " + target
+	} else {
+		// No existing tmux target — create a persistent tmux session
+		// wrapping the agent resume so it survives disconnects.
+		resumeCmd := "copilot --resume=" + s.ID
+		tmuxName := "tsession-" + s.ID[:8]
+		tmuxCmd := fmt.Sprintf("tmux new-session -As %s %s", tmuxName, shellQuote(resumeCmd))
+
+		switch remote.Type {
+		case "codespace", "devcontainer":
+			// tmux may not be installed — try it, fall back to direct resume.
+			remoteCmd = fmt.Sprintf("%s 2>/dev/null || %s", tmuxCmd, resumeCmd)
+		default:
+			// SSH: require tmux for session persistence.
+			remoteCmd = tmuxCmd
+		}
 	}
 
 	bin, args := remote.ResumeCommand()

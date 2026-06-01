@@ -170,10 +170,19 @@ JSON in a single SSH round-trip. Each remote appears as its own section:
 
 ### Resume behavior
 
-Selecting a remote session opens an interactive connection:
-- **ssh**: `ssh -t <host> tmux attach -t <target>` or `copilot --resume=<id>`
-- **codespace**: `gh codespace ssh --codespace <name> -t -- tmux attach -t <target>`
-- **devcontainer**: `docker exec -it -u <user> <container> tmux attach -t <target>`
+Remote sessions are always wrapped in tmux on the remote for persistence — if
+you disconnect, the agent keeps running and you can reattach later.
+
+**When the session already has a tmux target** (detected by gather):
+- Attaches directly: `ssh -t <host> tmux attach -t <target>`
+
+**When no tmux target exists** (first connection or tmux wasn't detected):
+
+| Type | Command |
+|------|---------|
+| `ssh` | `ssh -t <host> tmux new-session -As tsession-<id> 'copilot --resume=<id>'` |
+| `codespace` | Tries tmux, falls back to direct resume if tmux unavailable |
+| `devcontainer` | Tries tmux, falls back to direct resume if tmux unavailable |
 
 ### Flags
 

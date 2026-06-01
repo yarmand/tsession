@@ -86,8 +86,8 @@ func TestGatherResultToSessions(t *testing.T) {
 	if got[0].State.String() != "active" {
 		t.Fatalf("want active idle state, got %s", got[0].State)
 	}
-	if got[0].TmuxName != "pane-match" || got[0].TmuxTarget != "pane-match:2.1" {
-		t.Fatalf("want pane-based tmux match, got %+v", got[0])
+	if got[0].TmuxName != "" || got[0].TmuxTarget != "" {
+		t.Fatalf("want no remote tmux match (local resolution handles this), got TmuxName=%q TmuxTarget=%q", got[0].TmuxName, got[0].TmuxTarget)
 	}
 	if got[0].LastEventAt.IsZero() || got[0].UpdatedAt.IsZero() {
 		t.Fatalf("want timestamps parsed, got %+v", got[0])

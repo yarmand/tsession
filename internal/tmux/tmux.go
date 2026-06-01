@@ -18,6 +18,7 @@ type Pane struct {
 	WindowIndex string
 	PaneIndex   string
 	PID         int
+	Title       string // terminal title (set by running app, e.g. copilot session summary)
 }
 
 // Target returns the tmux target string for this pane, suitable for
@@ -158,6 +159,47 @@ func ListPanes() ([]Pane, error) {
 		return nil, nil
 	}
 	return parseListPanes(string(out)), nil
+}
+
+// ListPanesWithTitle returns panes including the pane title.
+// The title is set by the running application (e.g. copilot sets it to the
+// session summary), which propagates through SSH to the local terminal.
+func ListPanesWithTitle() ([]Pane, error) {
+	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{session_name}|#{window_index}|#{pane_index}|#{pane_pid}|#{pane_title}")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, nil
+	}
+	return parseListPanesWithTitle(string(out)), nil
+}
+
+func parseListPanesWithTitle(s string) []Pane {
+	var out []Pane
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 5)
+		if len(parts) < 4 {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(parts[3]))
+		if err != nil {
+			continue
+		}
+		p := Pane{
+			SessionName: parts[0],
+			WindowIndex: parts[1],
+			PaneIndex:   parts[2],
+			PID:         pid,
+		}
+		if len(parts) == 5 {
+			p.Title = parts[4]
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func parseListPanes(s string) []Pane {

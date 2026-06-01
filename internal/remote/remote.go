@@ -13,7 +13,6 @@ import (
 
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/sessions"
-	"github.com/yarma/tsession/internal/tmux"
 )
 
 //go:embed gather.bash
@@ -181,17 +180,9 @@ func (gr *GatherResult) ToSessions(origin string, maxAge time.Duration) []sessio
 		})
 	}
 
-	tmuxSessions := make([]tmux.Session, 0, len(gr.TmuxSessions))
-	for _, ts := range gr.TmuxSessions {
-		tmuxSessions = append(tmuxSessions, tmux.Session{Name: ts.Name, Path: ts.Path})
-	}
-	merged := sessions.MergeRemote(store, stateDirs, tmuxSessions, gr.ProcessTree)
-
-	panes := make([]tmux.Pane, 0, len(gr.TmuxPanes))
-	for _, pane := range gr.TmuxPanes {
-		panes = append(panes, tmux.Pane{SessionName: pane.SessionName, WindowIndex: pane.WindowIndex, PaneIndex: pane.PaneIndex, PID: pane.PID})
-	}
-	return sessions.ResolveTmuxByPIDWithTree(merged, stateDirs, panes, gr.ProcessTree)
+	// Only use remote data for state classification — don't set TmuxName/TmuxTarget
+	// from remote tmux info. Local pane resolution (ResolveRemotePanes) handles that.
+	return sessions.MergeRemote(store, stateDirs, nil, nil)
 }
 
 type tailEvent struct {

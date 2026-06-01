@@ -14,12 +14,14 @@ import (
 	"github.com/yarma/tsession/internal/remote"
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/tmux"
 )
 
 var (
-	loadConfig          = config.Load
-	fetchRemoteSessions = remote.FetchAll
-	loadAllLiveFn       = loadAllLive
+	loadConfig              = config.Load
+	fetchRemoteSessions     = remote.FetchAll
+	loadAllLiveFn           = loadAllLive
+	listPanesWithTitleFn    = tmux.ListPanesWithTitle
 )
 
 func List(args []string) error {
@@ -184,6 +186,9 @@ func loadAllWithRemotes(maxAge time.Duration, noCache bool, localOnly bool) (loc
 			remoteNames = append(remoteNames, r.Name)
 		}
 	}
+
+	// Resolve remote sessions to local tmux panes.
+	remoteMap = resolveRemotePanes(cfg.Remotes, remoteMap)
 	return local, remoteMap, remoteNames, warnings, nil
 }
 
@@ -247,4 +252,27 @@ func filterActive(in []sessions.Session) []sessions.Session {
 		out = append(out, s)
 	}
 	return out
+}
+
+// resolveRemotePanes matches remote sessions to local tmux panes that are
+// connected to the corresponding remote host. This allows resume to switch
+// to the local pane rather than opening a new connection.
+func resolveRemotePanes(remotes []config.Remote, remoteMap map[string][]sessions.Session) map[string][]sessions.Session {
+	if len(remoteMap) == 0 {
+		return remoteMap
+	}
+	panes, err := listPanesWithTitleFn()
+	if err != nil || len(panes) == 0 {
+		return remoteMap
+	}
+
+	// Build match patterns from config.
+	infos := make([]struct{ Name, Type, Host, SSHCommand, Codespace, Container string }, 0, len(remotes))
+	for _, r := range remotes {
+		infos = append(infos, struct{ Name, Type, Host, SSHCommand, Codespace, Container string }{
+			Name: r.Name, Type: r.Type, Host: r.Host, SSHCommand: r.SSHCommand,
+			Codespace: r.Codespace, Container: r.Container,
+		})
+	}
+	return sessions.ResolveRemotePanes(remoteMap, panes, sessions.MatchPatterns(infos))
 }

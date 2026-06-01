@@ -41,6 +41,19 @@ func Resume(args []string) error {
 	}
 
 	if match != nil && match.Origin != "" {
+		// Remote session: if we found a local tmux pane for it, switch to it.
+		if match.TmuxTarget != "" || match.TmuxName != "" {
+			tmuxTarget := match.TmuxTarget
+			if tmuxTarget == "" {
+				tmuxTarget = match.TmuxName
+			}
+			if err := tmux.SwitchClientTarget(tmuxTarget, *target); err != nil {
+				return err
+			}
+			_ = donestate.Clear(id)
+			return nil
+		}
+		// No local pane found — open a new connection and resume directly.
 		remote, err := remoteHost(match.Origin)
 		if err != nil {
 			return err
@@ -81,35 +94,10 @@ func Resume(args []string) error {
 }
 
 func remoteResumeArgs(s sessions.Session, remote config.Remote) []string {
-	target := s.TmuxTarget
-	if target == "" {
-		target = s.TmuxName
-	}
-
-	var remoteCmd string
-	if target != "" {
-		// Session already has a tmux pane — just attach.
-		remoteCmd = "tmux attach -t " + target
-	} else {
-		// No existing tmux target — create a persistent tmux session
-		// wrapping the agent resume so it survives disconnects.
-		resumeCmd := "copilot --resume=" + s.ID
-		tmuxName := "tsession-" + s.ID[:8]
-		tmuxCmd := fmt.Sprintf("tmux new-session -As %s %s", tmuxName, shellQuote(resumeCmd))
-
-		switch remote.Type {
-		case "codespace", "devcontainer":
-			// tmux may not be installed — try it, fall back to direct resume.
-			remoteCmd = fmt.Sprintf("%s 2>/dev/null || %s", tmuxCmd, resumeCmd)
-		default:
-			// SSH: require tmux for session persistence.
-			remoteCmd = tmuxCmd
-		}
-	}
-
+	resumeCmd := "copilot --resume=" + s.ID
 	bin, args := remote.ResumeCommand()
 	result := append([]string{bin}, args...)
-	result = append(result, remoteCmd)
+	result = append(result, resumeCmd)
 	return result
 }
 

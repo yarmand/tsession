@@ -39,6 +39,9 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 		} else if name, ok := tmuxByBase[filepath.Base(s.CWD)]; ok && s.CWD != "" {
 			s.TmuxName = name
 		}
+		if n, ok := sessionNames[s.ID]; ok {
+			s.Name = n
+		}
 
 		raw := s.State
 		entry := rt.Entries[s.ID]

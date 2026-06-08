@@ -132,7 +132,7 @@ Keybindings:
 	renameCmd := shellQuote(self) + " rename {2}"
 	renameBinding := "--bind=ctrl-n:execute(" + renameCmd + ")+reload(" + reloadCmd + ")"
 	if tmux.InTmux() {
-		renameBinding = "--bind=ctrl-n:execute-silent(tmux display-popup -E " + shellQuote(self) + " rename {2})+reload(" + reloadCmd + ")"
+		renameBinding = "--bind=ctrl-n:execute-silent(tmux display-popup -E -w 99% -h 5 " + shellQuote(self) + " rename {2})+reload(" + reloadCmd + ")"
 	}
 
 	fzfArgs := []string{

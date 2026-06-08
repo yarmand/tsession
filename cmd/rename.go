@@ -30,7 +30,7 @@ func Rename(args []string) error {
 		if current != "" {
 			fmt.Printf("Current name: %s\n", current)
 		}
-		fmt.Print("New name (empty to clear): ")
+		fmt.Println("New name (empty to clear):")
 		scanner := bufio.NewScanner(os.Stdin)
 		if scanner.Scan() {
 			name = strings.TrimSpace(scanner.Text())

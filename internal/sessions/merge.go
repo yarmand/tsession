@@ -11,18 +11,7 @@ import (
 )
 
 func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Session {
-	stateByID := map[string]StateDirInfo{}
-	for _, s := range stateDirs {
-		stateByID[s.ID] = s
-	}
-	tmuxByPath := map[string]string{}
-	tmuxByBase := map[string]string{}
-	for _, t := range tmuxs {
-		if t.Path != "" {
-			tmuxByPath[t.Path] = t.Name
-		}
-		tmuxByBase[t.Name] = t.Name
-	}
+	stateByID, tmuxByPath, tmuxByBase := mergeIndexes(stateDirs, tmuxs)
 
 	sessionNames, _ := names.Load()
 	if sessionNames == nil {
@@ -68,8 +57,6 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 				s.State = StateDone
 			}
 		default:
-			// Any other state (working, question, exited, unknown)
-			// clears a pending "done" marker.
 			if hadDone {
 				entry.DoneSince = time.Time{}
 				hadDone = false
@@ -88,6 +75,53 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 		_ = donestate.Save(rt)
 	}
 
+	sortMerged(out)
+	return out
+}
+
+func MergeRemote(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session, _ map[int]int) []Session {
+	stateByID, tmuxByPath, tmuxByBase := mergeIndexes(stateDirs, tmuxs)
+	out := make([]Session, 0, len(store))
+	for _, s := range store {
+		out = append(out, applyStateAndTmux(s, stateByID, tmuxByPath, tmuxByBase))
+	}
+	sortMerged(out)
+	return out
+}
+
+func mergeIndexes(stateDirs []StateDirInfo, tmuxs []tmux.Session) (map[string]StateDirInfo, map[string]string, map[string]string) {
+	stateByID := map[string]StateDirInfo{}
+	for _, s := range stateDirs {
+		stateByID[s.ID] = s
+	}
+	tmuxByPath := map[string]string{}
+	tmuxByBase := map[string]string{}
+	for _, t := range tmuxs {
+		if t.Path != "" {
+			tmuxByPath[t.Path] = t.Name
+		}
+		tmuxByBase[t.Name] = t.Name
+	}
+	return stateByID, tmuxByPath, tmuxByBase
+}
+
+func applyStateAndTmux(s Session, stateByID map[string]StateDirInfo, tmuxByPath, tmuxByBase map[string]string) Session {
+	if sd, ok := stateByID[s.ID]; ok {
+		s.State = sd.State
+		s.LastEventAt = sd.LastEventAt
+		if sd.CWD != "" {
+			s.CWD = sd.CWD
+		}
+	}
+	if name, ok := tmuxByPath[s.CWD]; ok {
+		s.TmuxName = name
+	} else if name, ok := tmuxByBase[filepath.Base(s.CWD)]; ok && s.CWD != "" {
+		s.TmuxName = name
+	}
+	return s
+}
+
+func sortMerged(out []Session) {
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
 		if ba, bb := bucket(a), bucket(b); ba != bb {
@@ -98,14 +132,14 @@ func Merge(store []Session, stateDirs []StateDirInfo, tmuxs []tmux.Session) []Se
 		}
 		return a.UpdatedAt.After(b.UpdatedAt)
 	})
-	return out
 }
 
 // bucket returns the primary sort group for a session (lower is earlier):
-//   0 — has an attached tmux session
-//   1 — is "active" (Waiting / Working / ActiveIdle), regardless of tmux
-//   2 — inactive idle / unknown
-//   3 — exited (always last)
+//
+//	0 — has an attached tmux session
+//	1 — is "active" (Waiting / Working / ActiveIdle), regardless of tmux
+//	2 — inactive idle / unknown
+//	3 — exited (always last)
 func bucket(s Session) int {
 	if s.State == StateExited {
 		return 3

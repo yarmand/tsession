@@ -45,4 +45,5 @@ type Session struct {
 	TmuxTarget  string
 	Name        string // user-defined display name (from ~/.tsession/names.json)
 	Source      string // "copilot" or "pi"
+	Origin      string // "" = local, otherwise remote name from config
 }

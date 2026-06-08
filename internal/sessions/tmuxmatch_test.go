@@ -22,7 +22,7 @@ func TestResolveTmuxByPID_WalksAncestorsToPane(t *testing.T) {
 	}
 	ppid := map[int]int{400: 300, 300: 200, 200: 100, 250: 100, 100: 1}
 
-	got := resolveWithTree(sess, sd, panes, ppid)
+	got := ResolveTmuxByPIDWithTree(sess, sd, panes, ppid)
 	if got[0].TmuxName != "k6-scenarios" {
 		t.Errorf("want TmuxName=k6-scenarios, got %q", got[0].TmuxName)
 	}
@@ -37,7 +37,7 @@ func TestResolveTmuxByPID_PreservesExistingTmuxName(t *testing.T) {
 	panes := []tmux.Pane{{SessionName: "by-pid", PID: 400}}
 	ppid := map[int]int{400: 1}
 
-	got := resolveWithTree(sess, sd, panes, ppid)
+	got := ResolveTmuxByPIDWithTree(sess, sd, panes, ppid)
 	if got[0].TmuxName != "already-set" {
 		t.Errorf("should not overwrite, got %q", got[0].TmuxName)
 	}
@@ -49,39 +49,10 @@ func TestResolveTmuxByPID_NoMatchLeavesEmpty(t *testing.T) {
 	panes := []tmux.Pane{{SessionName: "k6", PID: 999}}
 	ppid := map[int]int{400: 1}
 
-	got := resolveWithTree(sess, sd, panes, ppid)
+	got := ResolveTmuxByPIDWithTree(sess, sd, panes, ppid)
 	if got[0].TmuxName != "" {
 		t.Errorf("want empty TmuxName, got %q", got[0].TmuxName)
 	}
-}
-
-// resolveWithTree is a test helper mirroring ResolveTmuxByPID but using an
-// injected process-tree map, so tests don't depend on `ps`.
-func resolveWithTree(sess []Session, sd []StateDirInfo, panes []tmux.Pane, ppid map[int]int) []Session {
-	pidBySession := map[string]int{}
-	for _, s := range sd {
-		if s.PID > 0 {
-			pidBySession[s.ID] = s.PID
-		}
-	}
-	paneByPID := map[int]tmux.Pane{}
-	for _, p := range panes {
-		paneByPID[p.PID] = p
-	}
-	for i := range sess {
-		if sess[i].TmuxName != "" {
-			continue
-		}
-		pid, ok := pidBySession[sess[i].ID]
-		if !ok {
-			continue
-		}
-		if pane, ok := walkToPane(pid, ppid, paneByPID); ok {
-			sess[i].TmuxName = pane.SessionName
-			sess[i].TmuxTarget = pane.Target()
-		}
-	}
-	return sess
 }
 
 func TestParseProcessTree(t *testing.T) {

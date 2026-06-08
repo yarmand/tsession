@@ -81,3 +81,125 @@ See [AGENTS.md](AGENTS.md) for technical internals, full flag reference, and cac
   - github codespaces
   - devcontainers
 
+| Glyph | State    | Meaning                                                                |
+|-------|----------|------------------------------------------------------------------------|
+| ●     | working  | last event was `tool.execution_start` (non-prompting tool) / `agent.processing` |
+| ◐     | question | last event was `tool.execution_start` for `ask_user`/`ask_question`, or a permission request |
+| ✓     | done     | session just transitioned from `working` to `active`; cleared the first time you switch to its tmux pane |
+| ○     | active   | `session.db` held open by a live copilot process                       |
+| ·     | idle     | no live process, no shutdown event                                     |
+| ·     | exited   | `session.shutdown` event in `events.jsonl`                             |
+
+## Remote Sessions
+
+Display Copilot CLI sessions running on remote machines alongside your local
+sessions.
+
+### Setup
+
+Create `~/.config/tsession/config.yaml`:
+
+```yaml
+remotes:
+  # Plain SSH remote
+  - name: devbox
+    host: devbox.local
+
+  # SSH with custom path
+  - name: server
+    host: user@server.example.com
+    copilot_dir: /home/user/.copilot
+
+  # GitHub Codespace
+  - name: my-codespace
+    type: codespace
+    codespace: urban-broccoli-abc123
+
+  # Dev container (Docker)
+  - name: my-container
+    type: devcontainer
+    container: myapp_devcontainer
+    user: vscode
+
+  # Custom SSH command (advanced)
+  - name: custom
+    ssh_command: my-ssh-wrapper
+    host: target-host
+```
+
+#### Remote types
+
+| Type | Fields | Connect command |
+|------|--------|----------------|
+| `ssh` (default) | `host`, optional `ssh_command` | `ssh <host> ...` |
+| `codespace` | `codespace` (name) | `gh codespace ssh --codespace <name> ...` |
+| `devcontainer` | `container`, `user` | `docker exec -u <user> <container> ...` |
+
+#### All fields
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `name` | yes | — | Label shown in the section header |
+| `type` | no | `ssh` | Remote type: `ssh`, `codespace`, or `devcontainer` |
+| `host` | type=ssh | — | SSH destination (user@host or ssh-config alias) |
+| `ssh_command` | no | `ssh` | Custom SSH binary/command (type=ssh only) |
+| `codespace` | type=codespace | — | Codespace name (from `gh codespace list`) |
+| `container` | type=devcontainer | — | Docker container name |
+| `user` | type=devcontainer | — | User inside the container (e.g. `vscode`) |
+| `copilot_dir` | no | `~/.copilot` | Path to Copilot state on the remote |
+
+**Requirements on the remote:**
+- `bash` and `sqlite3` must be available in PATH
+- `tmux` (optional — enables pane-level matching)
+- SSH must be configured for passwordless access (key-based auth)
+
+### How it works
+
+`tsession` runs a lightweight gather script over SSH that collects session data
+from the remote's `~/.copilot/` directory and tmux state. Data is returned as
+JSON in a single SSH round-trip. Each remote appears as its own section:
+
+```
+── Local ──────────────────────────────────────────────────────────
+  ● working  2m  tsession    Fix browse layout
+  ○ active   1h  myproject   Add auth module
+── devbox ─────────────────────────────────────────────────────────
+  ● working  5m  backend     Implement caching
+  · idle     3h  infra       Terraform refactor
+```
+
+### Resume behavior
+
+Remote sessions are always wrapped in tmux on the remote for persistence — if
+you disconnect, the agent keeps running and you can reattach later.
+
+**When the session already has a tmux target** (detected by gather):
+- Attaches directly: `ssh -t <host> tmux attach -t <target>`
+
+**When no tmux target exists** (first connection or tmux wasn't detected):
+
+| Type | Command |
+|------|---------|
+| `ssh` | `ssh -t <host> tmux new-session -As tsession-<id> 'copilot --resume=<id>'` |
+| `codespace` | Tries tmux, falls back to direct resume if tmux unavailable |
+| `devcontainer` | Tries tmux, falls back to direct resume if tmux unavailable |
+
+### Flags
+
+| Flag           | Description                                        |
+|----------------|----------------------------------------------------|
+| `--local-only` | Skip remote gathering (useful offline or for speed) |
+
+### Caching
+
+When `tsession watch` is running, remote data is gathered alongside local data
+on each refresh cycle. Each remote has a 10-second timeout — unreachable hosts
+are skipped with a warning without blocking the local cache update.
+
+### Troubleshooting
+
+- **Remote unreachable:** The section shows as
+  `── devbox (unreachable) ──` and local sessions work normally.
+- **sqlite3 not found:** The remote is skipped. Install `sqlite3` on the remote.
+- **Slow SSH:** Ensure `ControlMaster` is configured in `~/.ssh/config` for
+  persistent connections. The gather script completes in <1s on most hosts.

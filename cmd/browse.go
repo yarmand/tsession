@@ -14,7 +14,7 @@ import (
 )
 
 func Browse(args []string) error {
-	// If not inside tmux, launch a new tmux session named 'session-nav' and
+	// If not inside tmux, launch the navigator tmux session (sessions-nav) and
 	// re-exec ourselves inside it with the same arguments.
 	if !tmux.InTmux() {
 		return launchInTmux(args)

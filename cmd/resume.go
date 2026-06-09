@@ -15,23 +15,32 @@ import (
 
 var execCommand = exec.Command
 
+// switchToPane focuses the agent at target, docking the navigator pane beside
+// it when running inside the navigator (navPane non-empty). Swappable in tests.
+var switchToPane = func(navPane, target string) error {
+	if navPane == "" {
+		return tmux.SwitchClient(target)
+	}
+	return tmux.NavHop(navPane, target)
+}
+
 func Resume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ExitOnError)
-	target := fs.String("target", "", "tmux client to switch (/dev/... path, or any value to pick interactively)")
 	summary := fs.String("summary", "", "session summary (tiebreaker for multi-pane remotes)")
 	origin := fs.String("origin", "", "remote origin name (for instant local pane lookup)")
 	_ = fs.Parse(args)
 
 	if fs.NArg() < 1 {
-		return fmt.Errorf("usage: tsession resume [--target=...] <session-id>")
+		return fmt.Errorf("usage: tsession resume <session-id>")
 	}
 	id := fs.Arg(0)
+	navPane := os.Getenv("TMUX_PANE")
 
 	// Fast path: if origin is provided, find the local tmux pane connected to
 	// that remote by checking pane child processes. No SSH or session loading needed.
 	if *origin != "" {
-		if paneTarget := findLocalPaneForRemote(*origin, *summary, *target); paneTarget != "" {
-			if err := tmux.SwitchClientTarget(paneTarget, *target); err != nil {
+		if paneTarget := findLocalPaneForRemote(*origin, *summary); paneTarget != "" {
+			if err := switchToPane(navPane, paneTarget); err != nil {
 				return err
 			}
 			_ = donestate.Clear(id)
@@ -74,7 +83,7 @@ func Resume(args []string) error {
 			if tmuxTarget == "" {
 				tmuxTarget = match.TmuxName
 			}
-			if err := tmux.SwitchClientTarget(tmuxTarget, *target); err != nil {
+			if err := switchToPane(navPane, tmuxTarget); err != nil {
 				return err
 			}
 			_ = donestate.Clear(id)
@@ -96,7 +105,7 @@ func Resume(args []string) error {
 		if tmuxTarget == "" {
 			tmuxTarget = match.TmuxName
 		}
-		if err := tmux.SwitchClientTarget(tmuxTarget, *target); err != nil {
+		if err := switchToPane(navPane, tmuxTarget); err != nil {
 			return err
 		}
 		_ = donestate.Clear(id)
@@ -170,7 +179,7 @@ func remoteHost(origin string) (config.Remote, error) {
 // given remote by checking child processes of each pane against the remote's
 // SSH/docker command pattern. Uses summary as tiebreaker if multiple panes
 // match the same remote.
-func findLocalPaneForRemote(origin, summary, _ string) string {
+func findLocalPaneForRemote(origin, summary string) string {
 	cfg, err := loadConfig()
 	if err != nil {
 		return ""

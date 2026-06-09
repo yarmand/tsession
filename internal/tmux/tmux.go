@@ -59,12 +59,19 @@ func PaneWidth(pane string) (int, error) {
 // window. targetWindow may be a window or pane target
 // (e.g. "sessions-nav:0" or "sess:1.2"). If the navigator is already in the
 // target window, join-pane fails harmlessly and the switch-client still runs.
+//
+// A sized join-pane fails when the requested width exceeds the target window
+// (e.g. hopping into a narrower window). In that case we retry the join without
+// a fixed size so the navigator still docks rather than being left behind.
 func NavHop(navPane, targetWindow string) error {
 	size := "30%"
 	if w, err := PaneWidth(navPane); err == nil && w > 0 {
 		size = strconv.Itoa(w)
 	}
-	_ = exec.Command("tmux", joinPaneLeftArgs(navPane, targetWindow, size)...).Run()
+	joined := exec.Command("tmux", joinPaneLeftArgs(navPane, targetWindow, size)...).Run() == nil
+	if !joined {
+		_ = exec.Command("tmux", joinPaneLeftArgs(navPane, targetWindow, "")...).Run()
+	}
 	return exec.Command("tmux", switchClientArgs(targetWindow)...).Run()
 }
 

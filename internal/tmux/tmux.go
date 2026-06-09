@@ -27,6 +27,48 @@ func (p Pane) Target() string {
 	return p.SessionName + ":" + p.WindowIndex + "." + p.PaneIndex
 }
 
+// NavSession is the holding session that owns the navigator pane.
+const NavSession = "sessions-nav"
+
+func paneWidthArgs(pane string) []string {
+	return []string{"display-message", "-p", "-t", pane, "#{pane_width}"}
+}
+
+func joinPaneLeftArgs(src, target, size string) []string {
+	args := []string{"join-pane", "-h", "-b"}
+	if size != "" {
+		args = append(args, "-l", size)
+	}
+	return append(args, "-s", src, "-t", target)
+}
+
+func switchClientArgs(target string) []string {
+	return []string{"switch-client", "-t", target}
+}
+
+// PaneWidth returns the column width of the given pane.
+func PaneWidth(pane string) (int, error) {
+	out, err := exec.Command("tmux", paneWidthArgs(pane)...).Output()
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(string(out)))
+}
+
+// NavHop moves the navigator pane (navPane, e.g. from $TMUX_PANE) to the left
+// of targetWindow, preserving the navigator's current width, then focuses that
+// window. targetWindow may be a window or pane target
+// (e.g. "sessions-nav:0" or "sess:1.2"). If the navigator is already in the
+// target window, join-pane fails harmlessly and the switch-client still runs.
+func NavHop(navPane, targetWindow string) error {
+	size := "30%"
+	if w, err := PaneWidth(navPane); err == nil && w > 0 {
+		size = strconv.Itoa(w)
+	}
+	_ = exec.Command("tmux", joinPaneLeftArgs(navPane, targetWindow, size)...).Run()
+	return exec.Command("tmux", switchClientArgs(targetWindow)...).Run()
+}
+
 func ListSessions() ([]Session, error) {
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_path}")
 	out, err := cmd.Output()

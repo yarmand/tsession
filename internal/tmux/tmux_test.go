@@ -1,6 +1,41 @@
 package tmux
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestPaneWidthArgs(t *testing.T) {
+	got := paneWidthArgs("%3")
+	want := []string{"display-message", "-p", "-t", "%3", "#{pane_width}"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("paneWidthArgs = %v, want %v", got, want)
+	}
+}
+
+func TestJoinPaneLeftArgs_WithSize(t *testing.T) {
+	got := joinPaneLeftArgs("%3", "sess:1.2", "82")
+	want := []string{"join-pane", "-h", "-b", "-l", "82", "-s", "%3", "-t", "sess:1.2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("joinPaneLeftArgs = %v, want %v", got, want)
+	}
+}
+
+func TestJoinPaneLeftArgs_NoSize(t *testing.T) {
+	got := joinPaneLeftArgs("%3", "sess:1.2", "")
+	want := []string{"join-pane", "-h", "-b", "-s", "%3", "-t", "sess:1.2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("joinPaneLeftArgs = %v, want %v", got, want)
+	}
+}
+
+func TestSwitchClientArgs(t *testing.T) {
+	got := switchClientArgs("sess:1.2")
+	want := []string{"switch-client", "-t", "sess:1.2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("switchClientArgs = %v, want %v", got, want)
+	}
+}
 
 func TestParseListSessions(t *testing.T) {
 	out := "alpha|/Users/x/alpha\nbeta|/Users/x/beta\n"

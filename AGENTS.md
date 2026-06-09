@@ -31,6 +31,14 @@ Resume uses the matched `session:window.pane` target so the exact pane hosting t
 
 If there is no tmux match, resume falls back to `copilot --resume <id>` (Copilot) or `pi --session <id>` (pi).
 
+## Navigator layout
+
+`tsession browse` (run outside tmux) creates a `sessions-nav` session laid out
+as `[nav | main]`. The `nav` pane runs the picker; `main` is a placeholder
+shell. On selection, the `nav` pane uses `join-pane` to dock to the left of the
+selected agent's existing window (preserving its width) and `switch-client`s
+there. There is no multi-client `--target`; one client follows the navigator.
+
 ## Pi Extension
 
 To track pi session state, install the bundled extension:
@@ -83,7 +91,7 @@ Pinned to bucket (`exited` always last; otherwise `tmux-attached` → `active no
 tsession list [flags]                        # print recent sessions to stdout
 tsession browse [flags] [q]                  # fzf picker in current terminal
 tsession popup [flags]                       # fzf picker designed for tmux popup
-tsession resume [--target=..] <session-id>   # switch tmux pane (or fall back)
+tsession resume <session-id>                 # dock navigator beside session (or fall back)
 tsession rename <session-id> [name]          # rename a session
 tsession vscode <session-id>                 # open session directory in VS Code
 tsession watch [--daemon]                    # refresh cache every --interval (default 10s)
@@ -102,7 +110,6 @@ tsession stop-watch                          # stop a running watch process
 | `--fzf` | (list only) Tab-delimited output for fzf consumption (display + selection ID) |
 | `--no-cache` | (list only) Skip the watcher cache and load live |
 | `--watch` | (browse only) Auto-refresh every 5s and re-open picker after each selection. `ESC` exits. |
-| `--target <value>` | (browse, resume) Switch a different tmux client. Pass a `/dev/...` path directly, or any other value (e.g. `pick`) to choose interactively via fzf at startup. |
 
 ## Session Names
 

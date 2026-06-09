@@ -10,23 +10,25 @@ Requires Go 1.25+, `tmux`, `fzf`, `lsof`.
 make install    # builds and installs to ~/.local/bin/tsession
 ```
 
-## Browse — session navigation in a terminal split
+## Browse — single-tmux navigation
 
-The primary workflow: use your terminal's native split to create two panes side by side. The left pane runs tsession as a persistent navigator; the right pane has a tmux client where your sessions live.
+The primary workflow: run `tsession browse` outside tmux. It creates a tmux
+session named `sessions-nav` laid out as two panes — `nav` on the left (the
+fzf picker) and `main` on the right (a placeholder shell):
 
 ![browse](browse.png)
 
-Before yo start tsession, use your native terminal split capabilities. the the split you want to display session, start a tmux session. This session is only here the tsession to easily discover the TTY.
-In the split youwant the navigation, start tsession with:
 ```bash
-tsession browse --watch --active --short --target pick
+tsession browse --watch --active --short
 ```
 
-On first launch, tsession asks you to pick which tmux client to target (the right pane). Then it shows a live-updating fzf list of active sessions. Press `enter` to switch the target pane to that session.
+Press `enter` to switch to a session: the `nav` pane docks itself to the left
+of that agent's own window (preserving its width), and the client follows.
+Agents are never moved — their scrollback and layout stay intact. Press `esc`
+to send the navigator home beside `main` and exit.
 
-The `--watch` flag keeps the picker open and refreshes every 5 seconds — it acts as a persistent session dashboard. Press `esc` to quit.
-
-If started outside tmux, browse auto-creates a tmux session named `session-nav` and re-runs inside it.
+The `--watch` flag keeps the picker open and refreshes every 5 seconds — a
+persistent session dashboard.
 
 ## Popup — quick switcher from any tmux pane
 

@@ -54,7 +54,7 @@ Usage:
   tsession list                List recent sessions (text)
   tsession browse [flags] [q]  fzf picker (auto-launches tmux if outside)
   tsession popup [flags]       fzf picker designed for tmux popup
-  tsession resume [--target=..] <session-id>  Switch tmux to session
+  tsession resume <session-id>                Dock navigator beside session
   tsession rename <session-id> [name]         Rename a session
   tsession vscode <session-id> Open session directory in VS Code
   tsession watch [--daemon]    Refresh ~/.tsession/cache.json every --interval (default 10s)

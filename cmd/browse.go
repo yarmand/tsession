@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
@@ -77,8 +80,18 @@ func launchInTmux(browseArgs []string) error {
 	// exists we just connect. new-session must be detached so we can split in
 	// the main pane before connecting. We operate on pane/window IDs rather than
 	// ":0.0" so this works regardless of the user's base-index / pane-base-index.
+	//
+	// Size the detached session to the controlling terminal so the 20% split
+	// below is computed against the real width. Otherwise tmux creates the
+	// session at its default 80 columns and, on connect, distributes the extra
+	// width evenly across panes — washing the 20% navigator back to ~half.
 	if !tmux.HasSession(tmux.NavSession) {
-		create := exec.Command("tmux", "new-session", "-d", "-s", tmux.NavSession, "-n", "nav", "-c", home, tmuxCmd)
+		args := []string{"new-session", "-d", "-s", tmux.NavSession, "-n", "nav", "-c", home}
+		if cols, rows, ok := terminalSize(); ok {
+			args = append(args, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows))
+		}
+		args = append(args, tmuxCmd)
+		create := exec.Command("tmux", args...)
 		create.Stdin, create.Stdout, create.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := create.Run(); err != nil {
 			return err
@@ -94,6 +107,18 @@ func launchInTmux(browseArgs []string) error {
 	attach := exec.Command("tmux", "attach-session", "-t", tmux.NavSession)
 	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return attach.Run()
+}
+
+// terminalSize reports the controlling terminal's column/row count, trying the
+// standard streams in turn. ok is false when none is a terminal (e.g. piped),
+// in which case the caller lets tmux fall back to its default session size.
+func terminalSize() (cols, rows int, ok bool) {
+	for _, f := range []*os.File{os.Stdout, os.Stdin, os.Stderr} {
+		if ws, err := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ); err == nil && ws.Col > 0 {
+			return int(ws.Col), int(ws.Row), true
+		}
+	}
+	return 0, 0, false
 }
 
 // navHome returns the navigator pane to its home window in sessions-nav (beside

@@ -84,8 +84,9 @@ func launchInTmux(browseArgs []string) error {
 			return err
 		}
 		// main: a plain shell to the right of nav, split off the nav pane by id.
+		// Sizing the new (main) pane to 80% leaves the nav pane at 20% width.
 		if navPane := tmux.FirstPaneID(tmux.NavSession); navPane != "" {
-			_ = exec.Command("tmux", "split-window", "-h", "-t", navPane, "-c", home).Run()
+			_ = exec.Command("tmux", "split-window", "-h", "-l", "80%", "-t", navPane, "-c", home).Run()
 			_ = exec.Command("tmux", "select-pane", "-t", navPane).Run()
 		}
 	}

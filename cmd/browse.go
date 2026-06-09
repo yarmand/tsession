@@ -46,17 +46,13 @@ func Browse(args []string) error {
 		return Resume([]string{id})
 	}
 
-	for {
-		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true)
-		if err != nil {
-			return err
-		}
-		// User pressed esc/ctrl-q — fzf exited with 130, no selection made.
-		if id == "" {
-			navHome()
-			return nil
-		}
-	}
+	// Watch mode: a single PERSISTENT navigator. The fzf picker stays alive and
+	// its pane travels to the selected agent (the enter binding hops without
+	// accepting), so we do not recreate fzf on every switch. fzf returns only
+	// when the user presses esc/ctrl-q.
+	_, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true, true)
+	navHome()
+	return err
 }
 
 // launchInTmux starts the navigator tmux session and runs tsession browse with
@@ -79,16 +75,19 @@ func launchInTmux(browseArgs []string) error {
 
 	// Create the holding session once, laid out as [nav | main]. If it already
 	// exists we just connect. new-session must be detached so we can split in
-	// the main pane before connecting.
-	if exec.Command("tmux", "has-session", "-t", tmux.NavSession).Run() != nil {
-		create := exec.Command("tmux", "new-session", "-d", "-s", tmux.NavSession, "-c", home, tmuxCmd)
+	// the main pane before connecting. We operate on pane/window IDs rather than
+	// ":0.0" so this works regardless of the user's base-index / pane-base-index.
+	if !tmux.HasSession(tmux.NavSession) {
+		create := exec.Command("tmux", "new-session", "-d", "-s", tmux.NavSession, "-n", "nav", "-c", home, tmuxCmd)
 		create.Stdin, create.Stdout, create.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if err := create.Run(); err != nil {
 			return err
 		}
-		// main: a plain shell to the right of nav.
-		_ = exec.Command("tmux", "split-window", "-h", "-t", tmux.NavSession+":0.0", "-c", home).Run()
-		_ = exec.Command("tmux", "select-pane", "-t", tmux.NavSession+":0.0").Run()
+		// main: a plain shell to the right of nav, split off the nav pane by id.
+		if navPane := tmux.FirstPaneID(tmux.NavSession); navPane != "" {
+			_ = exec.Command("tmux", "split-window", "-h", "-t", navPane, "-c", home).Run()
+			_ = exec.Command("tmux", "select-pane", "-t", navPane).Run()
+		}
 	}
 
 	attach := exec.Command("tmux", "attach-session", "-t", tmux.NavSession)
@@ -96,19 +95,27 @@ func launchInTmux(browseArgs []string) error {
 	return attach.Run()
 }
 
-// navHome returns the navigator pane to sessions-nav:0 (beside main) when the
-// picker exits, so a docked navigator does not get orphaned in an agent window.
+// navHome returns the navigator pane to its home window in sessions-nav (beside
+// main) when the picker exits, so a docked navigator is not orphaned in an
+// agent window. The home window is the first window of sessions-nav, resolved
+// by id so this is independent of base-index.
 func navHome() {
-	if navPane := os.Getenv("TMUX_PANE"); navPane != "" {
-		_ = tmux.NavHop(navPane, tmux.NavSession+":0")
+	navPane := os.Getenv("TMUX_PANE")
+	if navPane == "" {
+		return
 	}
+	home := tmux.FirstWindowID(tmux.NavSession)
+	if home == "" {
+		return
+	}
+	_ = tmux.NavHop(navPane, home)
 }
 
 func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool) (string, error) {
-	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false)
+	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false, false)
 }
 
-func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, autoReload bool) (string, error) {
+func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, autoReload, persist bool) (string, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -175,7 +182,7 @@ Keybindings:
 		"--footer= ●working ◐question ✓done ○active ·idle\n ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
 		"--footer-border=none",
 		"--color=footer:blue:bold",
-		enterBinding(self),
+		enterBinding(self, persist),
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
 		"--bind=ctrl-e:execute-silent(" + shellQuote(self) + " vscode {2})",
 		"--bind=?:preview(echo " + shellQuote(helpText) + ")",
@@ -290,15 +297,22 @@ func asExit(err error, target **exec.ExitError) bool {
 }
 
 // enterBinding returns the fzf --bind for the enter key.
-// Inside tmux it switches to the selected session; outside tmux it simply
-// accepts the selection and exits (attach cannot work without a tmux client).
-func enterBinding(self string) string {
+// Inside tmux it hops the navigator to the selected session via `tsession
+// resume`. When persist is true (the watch dashboard) the binding omits
+// `+accept` so the single fzf process stays alive and travels with its pane
+// instead of being recreated on every switch. Outside tmux it simply accepts
+// the selection and exits (attach cannot work without a tmux client).
+func enterBinding(self string, persist bool) string {
 	if tmux.InTmux() {
 		resumeCmd := shellQuote(self) + " resume"
 		// {10} is session origin (remote name), {8} is summary.
 		// fzf shell-quotes field replacements automatically.
 		resumeCmd += " --origin {10} --summary {8} {2}"
-		return "--bind=enter:execute-silent(" + resumeCmd + ")+accept"
+		binding := "--bind=enter:execute-silent(" + resumeCmd + ")"
+		if !persist {
+			binding += "+accept"
+		}
+		return binding
 	}
 	return "--bind=enter:accept"
 }

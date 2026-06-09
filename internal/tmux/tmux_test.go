@@ -37,6 +37,15 @@ func TestSwitchClientArgs(t *testing.T) {
 	}
 }
 
+func TestFirstLine(t *testing.T) {
+	if got := firstLine("\n  @3 \n@4\n"); got != "@3" {
+		t.Fatalf("firstLine = %q, want @3", got)
+	}
+	if got := firstLine("   \n\n"); got != "" {
+		t.Fatalf("firstLine empty = %q, want empty", got)
+	}
+}
+
 func TestParseListSessions(t *testing.T) {
 	out := "alpha|/Users/x/alpha\nbeta|/Users/x/beta\n"
 	got := parseListSessions(out)

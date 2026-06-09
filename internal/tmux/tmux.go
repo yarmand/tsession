@@ -113,6 +113,44 @@ func SwitchClient(name string) error {
 
 func InTmux() bool { return os.Getenv("TMUX") != "" }
 
+// HasSession reports whether a tmux session with the given name exists.
+func HasSession(name string) bool {
+	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
+}
+
+// FirstPaneID returns the pane id (e.g. "%3") of the first pane in the named
+// session, or "" if it can't be determined. Used to operate on panes by id
+// instead of assuming a window/pane base index of 0.
+func FirstPaneID(session string) string {
+	out, err := exec.Command("tmux", "list-panes", "-t", session, "-F", "#{pane_id}").Output()
+	if err != nil {
+		return ""
+	}
+	return firstLine(string(out))
+}
+
+// FirstWindowID returns the window id (e.g. "@2") of the first window in the
+// named session, or "" if it can't be determined. The navigator's home window
+// is always the lowest-indexed window of sessions-nav (agents are separate
+// windows/sessions), so this is base-index independent.
+func FirstWindowID(session string) string {
+	out, err := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_id}").Output()
+	if err != nil {
+		return ""
+	}
+	return firstLine(string(out))
+}
+
+func firstLine(s string) string {
+	for _, l := range strings.Split(s, "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			return l
+		}
+	}
+	return ""
+}
+
 // RenameSession renames a tmux session from oldName to newName.
 func RenameSession(oldName, newName string) error {
 	return exec.Command("tmux", "rename-session", "-t", oldName, newName).Run()

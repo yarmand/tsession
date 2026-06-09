@@ -14,7 +14,7 @@ func Popup(args []string) error {
 	localOnly := fs.Bool("local-only", false, "only show local sessions")
 	_ = fs.Parse(args)
 
-	id, err := runFzf(*maxAge, "", true, *active, *short, *lshort, *localOnly, "")
+	id, err := runFzf(*maxAge, "", true, *active, *short, *lshort, *localOnly)
 	if err != nil {
 		return err
 	}

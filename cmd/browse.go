@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/yarma/tsession/internal/render"
-	"github.com/yarma/tsession/internal/tmux"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/tmux"
 )
 
 func Browse(args []string) error {
@@ -27,7 +27,6 @@ func Browse(args []string) error {
 	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
 	localOnly := fs.Bool("local-only", false, "only show local sessions")
 	watch := fs.Bool("watch", false, "auto-refresh the list every 5s and keep browsing after each selection")
-	target := fs.String("target", "", "tmux client to switch (/dev/... path, or any value to pick interactively)")
 	_ = fs.Parse(args)
 	query := strings.Join(fs.Args(), " ")
 
@@ -35,44 +34,39 @@ func Browse(args []string) error {
 		return fmt.Errorf("fzf not found in PATH (brew install fzf)")
 	}
 
-	// Resolve target once at startup so the picker doesn't re-prompt on every selection.
-	resolvedTarget, err := tmux.ResolveTarget(*target)
-	if err != nil {
-		return err
-	}
-
 	if !*watch {
-		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort, *localOnly, resolvedTarget)
+		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort, *localOnly)
 		if err != nil {
 			return err
 		}
 		if id == "" {
+			navHome()
 			return nil
 		}
 		return Resume([]string{id})
 	}
 
 	for {
-		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true, resolvedTarget)
+		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true)
 		if err != nil {
 			return err
 		}
 		// User pressed esc/ctrl-q — fzf exited with 130, no selection made.
 		if id == "" {
+			navHome()
 			return nil
 		}
 	}
 }
 
-// launchInTmux starts a tmux session named "tsession" (in $HOME) and runs
-// tsession browse with the original arguments inside it.
+// launchInTmux starts the navigator tmux session and runs tsession browse with
+// the original arguments inside it.
 func launchInTmux(browseArgs []string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
 
-	// Build the command to run inside tmux: tsession browse <original args>
 	tmuxCmd := shellQuote(self) + " browse"
 	for _, a := range browseArgs {
 		tmuxCmd += " " + shellQuote(a)
@@ -83,18 +77,38 @@ func launchInTmux(browseArgs []string) error {
 		home = "/"
 	}
 
-	// Create or attach to a tmux session named "tsession", running our command.
-	// Use new-session with -A to attach if it already exists.
-	cmd := exec.Command("tmux", "new-session", "-A", "-s", "session-nav", "-c", home, tmuxCmd)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
+	// Create the holding session once, laid out as [nav | main]. If it already
+	// exists we just connect. new-session must be detached so we can split in
+	// the main pane before connecting.
+	if exec.Command("tmux", "has-session", "-t", tmux.NavSession).Run() != nil {
+		create := exec.Command("tmux", "new-session", "-d", "-s", tmux.NavSession, "-c", home, tmuxCmd)
+		create.Stdin, create.Stdout, create.Stderr = os.Stdin, os.Stdout, os.Stderr
+		if err := create.Run(); err != nil {
+			return err
+		}
+		// main: a plain shell to the right of nav.
+		_ = exec.Command("tmux", "split-window", "-h", "-t", tmux.NavSession+":0.0", "-c", home).Run()
+		_ = exec.Command("tmux", "select-pane", "-t", tmux.NavSession+":0.0").Run()
+	}
+
+	attach := exec.Command("tmux", "attach-session", "-t", tmux.NavSession)
+	attach.Stdin, attach.Stdout, attach.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return attach.Run()
 }
 
-func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, target string) (string, error) {
-	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false, target)
+// navHome returns the navigator pane to sessions-nav:0 (beside main) when the
+// picker exits, so a docked navigator does not get orphaned in an agent window.
+func navHome() {
+	if navPane := os.Getenv("TMUX_PANE"); navPane != "" {
+		_ = tmux.NavHop(navPane, tmux.NavSession+":0")
+	}
 }
 
-func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, autoReload bool, target string) (string, error) {
+func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool) (string, error) {
+	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false)
+}
+
+func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, autoReload bool) (string, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -161,7 +175,7 @@ Keybindings:
 		"--footer= ●working ◐question ✓done ○active ·idle\n ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename | ctrl-r: reload | esc: exit",
 		"--footer-border=none",
 		"--color=footer:blue:bold",
-		enterBinding(self, target),
+		enterBinding(self),
 		"--bind=ctrl-r:reload(" + reloadCmd + ")",
 		"--bind=ctrl-e:execute-silent(" + shellQuote(self) + " vscode {2})",
 		"--bind=?:preview(echo " + shellQuote(helpText) + ")",
@@ -278,12 +292,9 @@ func asExit(err error, target **exec.ExitError) bool {
 // enterBinding returns the fzf --bind for the enter key.
 // Inside tmux it switches to the selected session; outside tmux it simply
 // accepts the selection and exits (attach cannot work without a tmux client).
-func enterBinding(self, target string) string {
+func enterBinding(self string) string {
 	if tmux.InTmux() {
 		resumeCmd := shellQuote(self) + " resume"
-		if target != "" {
-			resumeCmd += " --target=" + shellQuote(target)
-		}
 		// {10} is session origin (remote name), {8} is summary.
 		// fzf shell-quotes field replacements automatically.
 		resumeCmd += " --origin {10} --summary {8} {2}"

@@ -1,7 +1,6 @@
 package tmux
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -94,93 +93,15 @@ func parseListSessions(s string) []Session {
 	return out
 }
 
+// SwitchClient switches the current tmux client to the named target, or
+// attaches if invoked from outside tmux.
 func SwitchClient(name string) error {
-	return SwitchClientTarget(name, "")
-}
-
-// SwitchClientTarget switches the specified tmux client to the given session.
-// If clientTarget is empty, it switches the current client (default behavior).
-// clientTarget is resolved via ResolveTarget before use.
-func SwitchClientTarget(name, clientTarget string) error {
-	resolved, err := ResolveTarget(clientTarget)
-	if err != nil {
-		return err
-	}
-
 	if !InTmux() {
 		cmd := exec.Command("tmux", "attach-session", "-t", name)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
 	}
-
-	args := []string{"switch-client", "-t", name}
-	if resolved != "" {
-		args = append(args, "-c", resolved)
-	}
-	return exec.Command("tmux", args...).Run()
-}
-
-// ResolveTarget resolves a --target value into a tmux client path.
-// Returns empty string if target is empty (meaning "current client").
-// If target is a "/dev/..." path, it's used directly.
-// Any other value triggers an interactive picker from tmux list-clients.
-func ResolveTarget(target string) (string, error) {
-	if target == "" {
-		return "", nil
-	}
-	if strings.HasPrefix(target, "/dev/") {
-		return target, nil
-	}
-	// Any other value (e.g. "pick", "?") triggers interactive selection.
-	return pickClient()
-}
-
-// pickClient shows tmux clients and lets the user choose one via fzf.
-func pickClient() (string, error) {
-	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_tty} #{session_name}").Output()
-	if err != nil {
-		return "", fmt.Errorf("list-clients failed: %w", err)
-	}
-	lines := splitNonEmpty(string(out))
-	if len(lines) == 0 {
-		return "", fmt.Errorf("no tmux clients found")
-	}
-	if len(lines) == 1 {
-		// Only one client — use it directly.
-		return strings.Fields(lines[0])[0], nil
-	}
-
-	// Use fzf if available, otherwise just pick the first non-current client.
-	fzfPath, fzfErr := exec.LookPath("fzf")
-	if fzfErr != nil {
-		// No fzf — return first client.
-		return strings.Fields(lines[0])[0], nil
-	}
-
-	input := strings.Join(lines, "\n")
-	cmd := exec.Command(fzfPath, "--prompt=target client> ", "--no-info", "--reverse")
-	cmd.Stdin = strings.NewReader(input)
-	cmd.Stderr = os.Stderr
-	selected, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("fzf cancelled")
-	}
-	fields := strings.Fields(strings.TrimSpace(string(selected)))
-	if len(fields) == 0 {
-		return "", fmt.Errorf("no client selected")
-	}
-	return fields[0], nil
-}
-
-func splitNonEmpty(s string) []string {
-	var out []string
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			out = append(out, line)
-		}
-	}
-	return out
+	return exec.Command("tmux", switchClientArgs(name)...).Run()
 }
 
 func InTmux() bool { return os.Getenv("TMUX") != "" }

@@ -45,6 +45,24 @@ func switchClientArgs(target string) []string {
 	return []string{"switch-client", "-t", target}
 }
 
+func paneIDArgs(target string) []string {
+	return []string{"display-message", "-p", "-t", target, "#{pane_id}"}
+}
+
+func selectPaneArgs(target string) []string {
+	return []string{"select-pane", "-t", target}
+}
+
+// PaneID resolves a tmux target (a pane index target like "work:1.0" or a
+// window id like "@2") to a stable pane id (e.g. "%5").
+func PaneID(target string) (string, error) {
+	out, err := exec.Command("tmux", paneIDArgs(target)...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // PaneWidth returns the column width of the given pane.
 func PaneWidth(pane string) (int, error) {
 	out, err := exec.Command("tmux", paneWidthArgs(pane)...).Output()
@@ -55,24 +73,30 @@ func PaneWidth(pane string) (int, error) {
 }
 
 // NavHop moves the navigator pane (navPane, e.g. from $TMUX_PANE) to the left
-// of targetWindow, preserving the navigator's current width, then focuses that
-// window. targetWindow may be a window or pane target
-// (e.g. "sessions-nav:0" or "sess:1.2"). If the navigator is already in the
-// target window, join-pane fails harmlessly and the switch-client still runs.
+// of target, preserving the navigator's current width, then focuses the target
+// pane. target may be a pane target (e.g. "work:1.2") or a window id (e.g.
+// "@2"); it is resolved to a stable pane id first because join-pane shifts pane
+// indices — the navigator becomes index 0, so an index-based target would
+// otherwise resolve to the navigator after the move. Focus lands on the target
+// (the agent/main pane), not the navigator that join-pane inserts.
 //
 // A sized join-pane fails when the requested width exceeds the target window
 // (e.g. hopping into a narrower window). In that case we retry the join without
 // a fixed size so the navigator still docks rather than being left behind.
-func NavHop(navPane, targetWindow string) error {
+func NavHop(navPane, target string) error {
+	dest := target
+	if id, err := PaneID(target); err == nil && id != "" {
+		dest = id
+	}
 	size := "30%"
 	if w, err := PaneWidth(navPane); err == nil && w > 0 {
 		size = strconv.Itoa(w)
 	}
-	joined := exec.Command("tmux", joinPaneLeftArgs(navPane, targetWindow, size)...).Run() == nil
-	if !joined {
-		_ = exec.Command("tmux", joinPaneLeftArgs(navPane, targetWindow, "")...).Run()
+	if exec.Command("tmux", joinPaneLeftArgs(navPane, dest, size)...).Run() != nil {
+		_ = exec.Command("tmux", joinPaneLeftArgs(navPane, dest, "")...).Run()
 	}
-	return exec.Command("tmux", switchClientArgs(targetWindow)...).Run()
+	_ = exec.Command("tmux", selectPaneArgs(dest)...).Run()
+	return exec.Command("tmux", switchClientArgs(dest)...).Run()
 }
 
 func ListSessions() ([]Session, error) {

@@ -46,6 +46,22 @@ func TestFirstLine(t *testing.T) {
 	}
 }
 
+func TestPaneIDArgs(t *testing.T) {
+	got := paneIDArgs("work:1.0")
+	want := []string{"display-message", "-p", "-t", "work:1.0", "#{pane_id}"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("paneIDArgs = %v, want %v", got, want)
+	}
+}
+
+func TestSelectPaneArgs(t *testing.T) {
+	got := selectPaneArgs("%5")
+	want := []string{"select-pane", "-t", "%5"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selectPaneArgs = %v, want %v", got, want)
+	}
+}
+
 func TestParseListSessions(t *testing.T) {
 	out := "alpha|/Users/x/alpha\nbeta|/Users/x/beta\n"
 	got := parseListSessions(out)

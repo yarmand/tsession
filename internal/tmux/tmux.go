@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -142,6 +143,32 @@ func splitNonEmpty(s string) []string {
 }
 
 func InTmux() bool { return os.Getenv("TMUX") != "" }
+
+// ResolveSessionName decides which tmux session name to use for a new session
+// rooted at path, given the current session list. If a session with the desired
+// name already exists at the same path, it returns (desired, true) signalling
+// the caller should resume it instead of creating a new one. If the name is
+// taken by a session at a different path, it returns a unique suffixed name
+// (desired-2, desired-3, ...) and false.
+func ResolveSessionName(desired, path string, existing []Session) (string, bool) {
+	byName := make(map[string]string, len(existing))
+	for _, s := range existing {
+		byName[s.Name] = s.Path
+	}
+	existingPath, taken := byName[desired]
+	if !taken {
+		return desired, false
+	}
+	if filepath.Clean(existingPath) == filepath.Clean(path) {
+		return desired, true
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", desired, i)
+		if _, ok := byName[candidate]; !ok {
+			return candidate, false
+		}
+	}
+}
 
 // RenameSession renames a tmux session from oldName to newName.
 func RenameSession(oldName, newName string) error {

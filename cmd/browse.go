@@ -28,6 +28,7 @@ func Browse(args []string) error {
 	localOnly := fs.Bool("local-only", false, "only show local sessions")
 	watch := fs.Bool("watch", false, "auto-refresh the list every 5s and keep browsing after each selection")
 	target := fs.String("target", "", "tmux client to switch (/dev/... path, or any value to pick interactively)")
+	notifyFlag := fs.Bool("notify", false, "fire desktop notifications when sessions become done or ask a question (macOS only)")
 	_ = fs.Parse(args)
 	query := strings.Join(fs.Args(), " ")
 
@@ -42,7 +43,7 @@ func Browse(args []string) error {
 	}
 
 	if !*watch {
-		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort, *localOnly, resolvedTarget)
+		id, err := runFzf(*maxAge, query, false, *active, *short, *lshort, *localOnly, resolvedTarget, *notifyFlag)
 		if err != nil {
 			return err
 		}
@@ -53,7 +54,7 @@ func Browse(args []string) error {
 	}
 
 	for {
-		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true, resolvedTarget)
+		id, err := runFzfOpts(*maxAge, query, false, *active, *short, *lshort, *localOnly, true, resolvedTarget, *notifyFlag)
 		if err != nil {
 			return err
 		}
@@ -90,11 +91,11 @@ func launchInTmux(browseArgs []string) error {
 	return cmd.Run()
 }
 
-func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, target string) (string, error) {
-	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false, target)
+func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, target string, notify bool) (string, error) {
+	return runFzfOpts(maxAge, query, popup, active, short, lshort, localOnly, false, target, notify)
 }
 
-func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, autoReload bool, target string) (string, error) {
+func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, autoReload bool, target string, notify bool) (string, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -111,6 +112,9 @@ func runFzfOpts(maxAge time.Duration, query string, popup, active, short bool, l
 	}
 	if localOnly {
 		reloadCmd += " --local-only"
+	}
+	if notify {
+		reloadCmd += " --notify"
 	}
 
 	useShort := short || lshort > 0

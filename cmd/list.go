@@ -11,6 +11,7 @@ import (
 
 	"github.com/yarma/tsession/internal/cache"
 	"github.com/yarma/tsession/internal/config"
+	"github.com/yarma/tsession/internal/notify"
 	"github.com/yarma/tsession/internal/remote"
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
@@ -34,6 +35,7 @@ func List(args []string) error {
 	active := fs.Bool("active", false, "only show sessions attached to tmux with a known, non-exited state")
 	short := fs.Bool("short", false, "compact output: state, age, repo basename, summary truncated to 30 chars")
 	lshort := fs.Int("lshort", 0, "like --short, but also truncate each output line to N characters")
+	notifyFlag := fs.Bool("notify", false, "fire desktop notifications when sessions become done or ask a question (macOS only)")
 	_ = fs.Parse(args)
 
 	local, remoteMap, remoteNames, warnings, err := loadAllWithRemotes(*maxAge, *noCache, *localOnly)
@@ -42,6 +44,16 @@ func List(args []string) error {
 	}
 	for _, warning := range warnings {
 		fmt.Fprintln(os.Stderr, "warning:", warning)
+	}
+
+	if *notifyFlag {
+		full := append([]sessions.Session(nil), local...)
+		for _, name := range remoteNames {
+			full = append(full, remoteMap[name]...)
+		}
+		if err := notify.Process(full); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: notify failed:", err)
+		}
 	}
 
 	if *active {

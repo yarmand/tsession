@@ -70,6 +70,22 @@ Then `Alt-s` opens the picker as an overlay from any pane. Select a session and 
 | ○ | Waiting for user input |
 | · | Idle or exited |
 
+## Notifications
+
+Pass `--notify` to `watch`, `list`, or `browse` to get a macOS notification the
+moment an agent finishes (`done`, sound "Tink") or asks a question (`question`,
+sound "Funk"). The most common setups are:
+
+```bash
+tsession watch --daemon --notify     # background daemon (recommended)
+tsession browse --watch --notify     # while browsing
+```
+
+State is tracked in `~/.tsession/notify.json`; the first observation of each
+session is recorded silently so you are not flooded on startup. Notifications
+fire only while a long-running observer (`watch --daemon` or `browse --watch`)
+is running. macOS only — a no-op on other platforms.
+
 ---
 See [AGENTS.md](AGENTS.md) for technical internals, full flag reference, and cache architecture.
 

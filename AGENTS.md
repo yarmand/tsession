@@ -81,6 +81,8 @@ Pinned to bucket (`exited` always last; otherwise `tmux-attached` → `active no
 
 ```
 tsession list [flags]                        # print recent sessions to stdout
+tsession new <branch> [-- copilot-args]      # create worktree + tmux session, start copilot
+tsession new --path <dir> [-- copilot-args]  # start a session on an existing worktree
 tsession browse [flags] [q]                  # fzf picker in current terminal
 tsession popup [flags]                       # fzf picker designed for tmux popup
 tsession resume [--target=..] <session-id>   # switch tmux pane (or fall back)
@@ -89,6 +91,21 @@ tsession vscode <session-id>                 # open session directory in VS Code
 tsession watch [--daemon]                    # refresh cache every --interval (default 10s)
 tsession stop-watch                          # stop a running watch process
 ```
+
+## New Sessions (`new`)
+
+`tsession new <branch>` creates a git worktree, opens a tmux session named
+`basename(worktree-path)`, and starts copilot in it. `tsession new --path <dir>`
+does the same on an existing worktree. Anything after `--` is forwarded to
+copilot.
+
+The worktree-creation commands are configurable via `~/.config/tsession/new-worktree.sh`,
+auto-created with defaults on first run. The script receives the branch name as
+`$1` and must print the final worktree path as the last line of stdout. The
+default creates `<repo>.worktrees/<branch>` with a `$USER/<branch>` branch.
+
+If a tmux session with the target name already exists at the same path, `new`
+resumes it; if it exists at a different path, `new` uses a unique suffixed name.
 
 ### Flags (`list`, `browse`, `popup`)
 

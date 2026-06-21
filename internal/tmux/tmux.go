@@ -144,6 +144,13 @@ func splitNonEmpty(s string) []string {
 
 func InTmux() bool { return os.Getenv("TMUX") != "" }
 
+// NewSession creates a detached tmux session named name, with working directory
+// path, running command (interpreted by the shell). Use SwitchClientTarget to
+// focus it afterward.
+func NewSession(name, path, command string) error {
+	return exec.Command("tmux", "new-session", "-d", "-s", name, "-c", path, command).Run()
+}
+
 // ResolveSessionName decides which tmux session name to use for a new session
 // rooted at path, given the current session list. If a session with the desired
 // name already exists at the same path, it returns (desired, true) signalling

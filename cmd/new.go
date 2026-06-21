@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 )
 
 // splitDashDash splits args at the first literal "--". Everything before is the
@@ -29,23 +28,13 @@ func validateNewArgs(branch, path string) error {
 	}
 }
 
-// needsShellQuoting reports whether s contains characters that require shell
-// quoting (spaces, tabs, or shell metacharacters).
-func needsShellQuoting(s string) bool {
-	return strings.ContainsAny(s, " \t'\"\\$`!#&*()[]{};<>|~")
-}
-
 // buildCopilotCommand builds the shell command run inside the tmux session.
-// Arguments that contain special characters are shell-quoted; safe arguments
-// are appended as-is.
+// Every forwarded argument is shell-quoted so embedded spaces or metacharacters
+// are passed to copilot intact.
 func buildCopilotCommand(extra []string) string {
 	cmd := "copilot"
 	for _, a := range extra {
-		if needsShellQuoting(a) {
-			cmd += " " + shellQuote(a)
-		} else {
-			cmd += " " + a
-		}
+		cmd += " " + shellQuote(a)
 	}
 	return cmd
 }

@@ -45,7 +45,7 @@ func TestBuildCopilotCommand(t *testing.T) {
 	if got := buildCopilotCommand(nil); got != "copilot" {
 		t.Errorf("got %q, want copilot", got)
 	}
-	if got := buildCopilotCommand([]string{"--resume", "x y"}); got != "copilot --resume 'x y'" {
+	if got := buildCopilotCommand([]string{"--resume", "x y"}); got != "copilot '--resume' 'x y'" {
 		t.Errorf("got %q", got)
 	}
 }

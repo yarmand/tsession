@@ -45,3 +45,38 @@ func TestEnsureScriptPreservesExisting(t *testing.T) {
 		t.Fatalf("existing script overwritten: %q", string(data))
 	}
 }
+
+func TestCreateReturnsLastStdoutLine(t *testing.T) {
+	dir := t.TempDir()
+	configHome = func() (string, error) { return dir, nil }
+	path := filepath.Join(dir, "new-worktree.sh")
+	stub := "#!/usr/bin/env bash\n" +
+		"echo \"progress\" >&2\n" +
+		"echo \"\"\n" +
+		"echo \"/tmp/fake/$1\"\n"
+	if err := os.WriteFile(path, []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Create("mybranch")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got != "/tmp/fake/mybranch" {
+		t.Fatalf("got %q, want /tmp/fake/mybranch", got)
+	}
+}
+
+func TestCreateErrorsWhenNoPathPrinted(t *testing.T) {
+	dir := t.TempDir()
+	configHome = func() (string, error) { return dir, nil }
+	path := filepath.Join(dir, "new-worktree.sh")
+	stub := "#!/usr/bin/env bash\necho \"only stderr\" >&2\n"
+	if err := os.WriteFile(path, []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Create("b"); err == nil {
+		t.Fatal("expected error when script prints no path")
+	}
+}

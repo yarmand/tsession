@@ -103,6 +103,16 @@ func TestResolveSessionName(t *testing.T) {
 			},
 			wantName: "foo-3", wantResume: false,
 		},
+		{
+			name:    "resumes suffixed session already at target path",
+			desired: "foo",
+			path:    "/a",
+			existing: []Session{
+				{Name: "foo", Path: "/b"},
+				{Name: "foo-2", Path: "/a"},
+			},
+			wantName: "foo-2", wantResume: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

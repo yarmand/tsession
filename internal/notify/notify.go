@@ -60,18 +60,40 @@ func messageFor(state, label string) (message, bool) {
 }
 
 // displayLabel resolves the human-facing session label using the same priority
-// as the UI: user-defined Name, then Summary, then basename(CWD), then ID.
+// as the UI: user-defined Name, then Summary, then basename(CWD), then ID. The
+// chosen value is sanitized (control characters collapsed to spaces) so no
+// label source can smuggle newlines or other control bytes into the external
+// osascript payload, regardless of which branch supplied it.
 func displayLabel(s sessions.Session) string {
-	if s.Name != "" {
-		return s.Name
+	switch {
+	case s.Name != "":
+		return sanitizeLabel(s.Name)
+	case s.Summary != "":
+		return sanitizeLabel(s.Summary)
+	case s.CWD != "":
+		return sanitizeLabel(filepath.Base(s.CWD))
+	default:
+		return sanitizeLabel(s.ID)
 	}
-	if s.Summary != "" {
-		return strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " ")
+}
+
+// sanitizeLabel replaces every ASCII control character (including newline,
+// carriage return, tab, and DEL) with a space, then collapses runs of
+// whitespace and trims. This keeps the notification payload to a single clean
+// line and is defense-in-depth alongside escapeAppleScript: the escaping
+// prevents breaking out of the AppleScript string literal, and this prevents
+// control bytes from reaching the osascript command at all.
+func sanitizeLabel(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			b.WriteByte(' ')
+			continue
+		}
+		b.WriteRune(r)
 	}
-	if s.CWD != "" {
-		return filepath.Base(s.CWD)
-	}
-	return s.ID
+	return strings.Join(strings.Fields(b.String()), " ")
 }
 
 // escapeAppleScript escapes a string for use inside an AppleScript double-

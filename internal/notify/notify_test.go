@@ -59,6 +59,30 @@ func TestDisplayLabel(t *testing.T) {
 	}
 }
 
+func TestSanitizeLabel(t *testing.T) {
+	cases := map[string]string{
+		"plain":           "plain",
+		"line1\nline2":    "line1 line2",
+		"tab\there":       "tab here",
+		"cr\rthere":       "cr there",
+		"  spaced  out  ": "spaced out",
+		"bell\x07del\x7f": "bell del",
+		"a\n\n\nb":        "a b",
+	}
+	for in, want := range cases {
+		if got := sanitizeLabel(in); got != want {
+			t.Errorf("sanitizeLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// Every label source must be sanitized, not just Summary.
+	if got := displayLabel(sessions.Session{Name: "evil\nname"}); got != "evil name" {
+		t.Errorf("Name not sanitized: got %q", got)
+	}
+	if got := displayLabel(sessions.Session{ID: "id\x00x"}); got != "id x" {
+		t.Errorf("ID not sanitized: got %q", got)
+	}
+}
+
 func TestEscapeAppleScript(t *testing.T) {
 	cases := map[string]string{
 		`plain`:      `plain`,

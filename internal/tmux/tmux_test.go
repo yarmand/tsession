@@ -62,3 +62,64 @@ func TestSplitNonEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveSessionName(t *testing.T) {
+	cases := []struct {
+		name     string
+		desired  string
+		path     string
+		existing []Session
+		wantName string
+		wantResume bool
+	}{
+		{
+			name:     "no existing",
+			desired:  "foo",
+			path:     "/a",
+			existing: nil,
+			wantName: "foo", wantResume: false,
+		},
+		{
+			name:     "same name same path resumes",
+			desired:  "foo",
+			path:     "/a",
+			existing: []Session{{Name: "foo", Path: "/a"}},
+			wantName: "foo", wantResume: true,
+		},
+		{
+			name:     "same name different path suffixes",
+			desired:  "foo",
+			path:     "/a",
+			existing: []Session{{Name: "foo", Path: "/b"}},
+			wantName: "foo-2", wantResume: false,
+		},
+		{
+			name:    "skips taken suffixes",
+			desired: "foo",
+			path:    "/a",
+			existing: []Session{
+				{Name: "foo", Path: "/b"},
+				{Name: "foo-2", Path: "/c"},
+			},
+			wantName: "foo-3", wantResume: false,
+		},
+		{
+			name:    "resumes suffixed session already at target path",
+			desired: "foo",
+			path:    "/a",
+			existing: []Session{
+				{Name: "foo", Path: "/b"},
+				{Name: "foo-2", Path: "/a"},
+			},
+			wantName: "foo-2", wantResume: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotName, gotResume := ResolveSessionName(tc.desired, tc.path, tc.existing)
+			if gotName != tc.wantName || gotResume != tc.wantResume {
+				t.Fatalf("got (%q,%v), want (%q,%v)", gotName, gotResume, tc.wantName, tc.wantResume)
+			}
+		})
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -142,6 +143,42 @@ func splitNonEmpty(s string) []string {
 }
 
 func InTmux() bool { return os.Getenv("TMUX") != "" }
+
+// NewSession creates a detached tmux session named name, with working directory
+// path, running command (interpreted by the shell). Use SwitchClientTarget to
+// focus it afterward.
+func NewSession(name, path, command string) error {
+	return exec.Command("tmux", "new-session", "-d", "-s", name, "-c", path, command).Run()
+}
+
+// ResolveSessionName decides which tmux session name to use for a new session
+// rooted at path, given the current session list. If any existing session is
+// already rooted at the same path, it returns that session's name and true,
+// signalling the caller should resume it instead of creating a new one. This
+// makes re-running `new` on the same worktree reattach rather than spawn
+// duplicates, even when the session previously took a suffixed name. Otherwise,
+// if the desired name is free it is returned; if the desired name is taken by a
+// session at a different path, a unique suffixed name (desired-2, desired-3,
+// ...) is returned with false.
+func ResolveSessionName(desired, path string, existing []Session) (string, bool) {
+	cleanTarget := filepath.Clean(path)
+	taken := make(map[string]bool, len(existing))
+	for _, s := range existing {
+		taken[s.Name] = true
+		if filepath.Clean(s.Path) == cleanTarget {
+			return s.Name, true
+		}
+	}
+	if !taken[desired] {
+		return desired, false
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", desired, i)
+		if !taken[candidate] {
+			return candidate, false
+		}
+	}
+}
 
 // RenameSession renames a tmux session from oldName to newName.
 func RenameSession(oldName, newName string) error {

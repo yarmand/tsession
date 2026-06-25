@@ -106,6 +106,39 @@ See [AGENTS.md](AGENTS.md) for technical internals, full flag reference, and cac
 | ·     | idle     | no live process, no shutdown event                                     |
 | ·     | exited   | `session.shutdown` event in `events.jsonl`                             |
 
+## Creating Sessions
+
+Create a fresh worktree and start a Copilot session in it:
+
+```bash
+tsession new my-feature                 # creates a worktree for branch my-feature
+tsession new --path ~/src/repo.wt/foo   # use an existing worktree
+tsession new my-feature -- --resume     # forward args after -- to copilot
+```
+
+`new` creates (or reuses) a git worktree, opens a tmux session named after the
+worktree directory, and launches `copilot` inside it, then switches/attaches you
+to that session.
+
+### Configuring worktree creation
+
+The commands used to create the worktree live in
+`~/.config/tsession/new-worktree.sh`, auto-created with defaults on first run.
+The script receives the branch name as `$1` and must print the resulting
+worktree path as the **last line of stdout**. Edit it freely to match your
+workflow. The default:
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+repo_root="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+wt_folder="${repo_root}.worktrees"
+mkdir -p "$wt_folder"
+wt_path="$(realpath "$wt_folder")/$1"
+git worktree add -b "$USER/$1" "$wt_path"
+echo "$wt_path"
+```
+
 ## Remote Sessions
 
 Display Copilot CLI sessions running on remote machines alongside your local

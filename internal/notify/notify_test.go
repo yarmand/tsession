@@ -108,6 +108,42 @@ func TestLoadSnapshotCorrupt(t *testing.T) {
 	}
 }
 
+// TestProcessExactlyOnceAcrossObservers simulates two independent observers
+// (e.g. the watch daemon and a browse --watch `list` reload) processing the same
+// done transition over the shared snapshot. The transition must fire exactly
+// once: the first observer fires and persists, the second sees no change.
+func TestProcessExactlyOnceAcrossObservers(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	calls := withCaptureFire(t)
+
+	// Establish a prior sighting so the done transition is not the silent
+	// first-sighting case.
+	_ = Process([]sessions.Session{sess("a", sessions.StateWorking)})
+
+	// Observer 1 then observer 2 both see the session as done.
+	_ = Process([]sessions.Session{sess("a", sessions.StateDone)})
+	_ = Process([]sessions.Session{sess("a", sessions.StateDone)})
+
+	if len(*calls) != 1 {
+		t.Fatalf("transition must fire exactly once across observers, got %d: %v", len(*calls), *calls)
+	}
+}
+
+// TestProcessDuplicateSessionIDsFireOnce guards against spam when a session ID
+// appears more than once in a single batch (e.g. the same session reported by
+// two data sources). It must fire only once for that batch's transition.
+func TestProcessDuplicateSessionIDsFireOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	calls := withCaptureFire(t)
+
+	_ = Process([]sessions.Session{sess("a", sessions.StateWorking), sess("a", sessions.StateWorking)})
+	_ = Process([]sessions.Session{sess("a", sessions.StateDone), sess("a", sessions.StateDone)})
+
+	if len(*calls) != 1 {
+		t.Fatalf("duplicate IDs in one batch must fire once, got %d: %v", len(*calls), *calls)
+	}
+}
+
 type fired struct {
 	title string
 	sound string

@@ -161,6 +161,18 @@ func lock(path string) (func(), error) {
 // silently (no notification) to avoid a flood for sessions already idle when
 // observation begins. Sessions absent from ss are pruned from the snapshot.
 //
+// Anti-spam / no-duplicate guarantees:
+//   - Deterministic triggers: notifiableState is a pure function of state and
+//     the fire/no-fire decision is a pure diff of (ss, snapshot).
+//   - Debounce: a session that stays in the same notifiable state across cycles
+//     re-uses the recorded entry (cur == prev) and does not re-fire, so a
+//     long-running done/question state never spams on every poll.
+//   - Idempotency: the cross-process flock held for the whole read-modify-write
+//     plus the snapshot persisted before unlock make each transition fire
+//     exactly once even when several observers (watch --daemon and the repeated
+//     `list` reloads from browse --watch) run concurrently or reconnect, and
+//     even when a session ID appears more than once in a single batch.
+//
 // Errors are returned but are intended to be non-fatal to callers: a failure to
 // notify must never break list/browse/watch.
 func Process(ss []sessions.Session) error {

@@ -250,7 +250,7 @@ func TestRefresh_WritesRemoteSessionsToCache(t *testing.T) {
 		}, []string{"remote ci: warning"}
 	}
 
-	if err := refresh(10*time.Second, 24*time.Hour); err != nil {
+	if err := refresh(10*time.Second, 24*time.Hour, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := cache.Read()

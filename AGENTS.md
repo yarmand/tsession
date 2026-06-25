@@ -55,6 +55,25 @@ The cache file is `~/.tsession/cache.json`. When it's within `2 × interval` of 
 
 Pass `--no-cache` to `list` to force a live load. The watcher is **not** auto-started; run `tsession watch --daemon` once per login session if you want the cache.
 
+## Notifications (`--notify`)
+
+`--notify` fires a macOS notification (via `osascript`) when a session enters
+`done` (message `[name] done!`, sound "Tink") or `question` (`[name] needs your
+input`, sound "Funk"). `name` is the UI label priority: `Name` → `Summary` →
+`basename(cwd)`.
+
+The `internal/notify` package diffs the current session list against a persisted
+snapshot, `~/.tsession/notify.json` (map of session ID → last-notified state),
+under an advisory `flock` on `~/.tsession/notify.lock`. The lock makes each
+transition fire **exactly once** even when `watch --daemon --notify` and
+`browse --watch --notify` observe concurrently. The first time a session ID is
+seen its state is recorded silently (no notification) to avoid a startup flood.
+
+Notifications are independent of `donestate` (which drives `done` rendering and
+is consumed by every load). `browse --watch` refreshes by re-running
+`tsession list --fzf --notify` every 5s, so the snapshot must be on disk rather
+than in memory. macOS only — `fire` is a build-tagged no-op elsewhere.
+
 ## Sort Order
 
 Pinned to bucket (`exited` always last; otherwise `tmux-attached` → `active no-tmux` → `idle`), then by state priority, then by recency.
@@ -103,6 +122,7 @@ tsession stop-watch                          # stop a running watch process
 | `--no-cache` | (list only) Skip the watcher cache and load live |
 | `--watch` | (browse only) Auto-refresh every 5s and re-open picker after each selection. `ESC` exits. |
 | `--target <value>` | (browse, resume) Switch a different tmux client. Pass a `/dev/...` path directly, or any other value (e.g. `pick`) to choose interactively via fzf at startup. |
+| `--notify` | (list, browse, watch) Fire a macOS desktop notification when a session enters `done` (sound "Tink") or `question` (sound "Funk"). Off by default. Needs a long-running observer: `watch --daemon --notify` or `browse --watch --notify`. No-op on non-macOS. |
 
 ## Session Names
 

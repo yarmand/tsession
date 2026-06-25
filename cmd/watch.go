@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/yarma/tsession/internal/cache"
+	"github.com/yarma/tsession/internal/notify"
 	"github.com/yarma/tsession/internal/pisessions"
 	"github.com/yarma/tsession/internal/sessions"
 	"github.com/yarma/tsession/internal/tmux"
@@ -32,10 +33,11 @@ func Watch(args []string) error {
 	interval := fs.Duration("interval", 10*time.Second, "how often to refresh the cache")
 	maxAge := fs.Duration("max-age", 14*24*time.Hour, "ignore sessions older than this")
 	daemon := fs.Bool("daemon", false, "re-exec detached, log to ~/.tsession/watch.log")
+	notifyFlag := fs.Bool("notify", false, "fire desktop notifications when sessions become done or ask a question (macOS only)")
 	_ = fs.Parse(args)
 
 	if *daemon && os.Getenv(daemonEnvFlag) == "" {
-		return spawnDaemon(*interval, *maxAge)
+		return spawnDaemon(*interval, *maxAge, *notifyFlag)
 	}
 
 	if err := writePid(os.Getpid()); err != nil {
@@ -49,7 +51,7 @@ func Watch(args []string) error {
 	tick := time.NewTicker(*interval)
 	defer tick.Stop()
 
-	if err := refresh(*interval, *maxAge); err != nil {
+	if err := refresh(*interval, *maxAge, *notifyFlag); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: initial refresh failed:", err)
 	}
 	for {
@@ -57,7 +59,7 @@ func Watch(args []string) error {
 		case <-stop:
 			return nil
 		case <-tick.C:
-			if err := refresh(*interval, *maxAge); err != nil {
+			if err := refresh(*interval, *maxAge, *notifyFlag); err != nil {
 				fmt.Fprintln(os.Stderr, "warning: refresh failed:", err)
 			}
 		}
@@ -100,7 +102,7 @@ func StopWatch(args []string) error {
 	return nil
 }
 
-func refresh(interval, maxAge time.Duration) error {
+func refresh(interval, maxAge time.Duration, notifyEnabled bool) error {
 	local, err := loadAllLiveFn(maxAge)
 	if err != nil {
 		return err
@@ -124,6 +126,12 @@ func refresh(interval, maxAge time.Duration) error {
 			if s, ok := remoteMap[r.Name]; ok {
 				allSessions = append(allSessions, s...)
 			}
+		}
+	}
+
+	if notifyEnabled {
+		if err := notify.Process(allSessions); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: notify failed:", err)
 		}
 	}
 
@@ -255,7 +263,7 @@ func errIsESRCH(err error) bool {
 // spawnDaemon re-execs the current binary with TSESSION_WATCH_DAEMON=1,
 // detached from the controlling terminal, with stdout/stderr appended to
 // ~/.tsession/watch.log.
-func spawnDaemon(interval, maxAge time.Duration) error {
+func spawnDaemon(interval, maxAge time.Duration, notifyEnabled bool) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -282,6 +290,9 @@ func spawnDaemon(interval, maxAge time.Duration) error {
 		"watch",
 		"--interval=" + interval.String(),
 		"--max-age=" + maxAge.String(),
+	}
+	if notifyEnabled {
+		args = append(args, "--notify")
 	}
 	env := append(os.Environ(), daemonEnvFlag+"=1")
 

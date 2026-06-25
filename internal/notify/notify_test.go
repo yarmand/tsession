@@ -1,8 +1,10 @@
 package notify
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/yarma/tsession/internal/sessions"
@@ -116,8 +118,9 @@ func withCaptureFire(t *testing.T) *[]fired {
 	t.Helper()
 	var calls []fired
 	prev := fireFunc
-	fireFunc = func(title, sound string) {
+	fireFunc = func(title, sound string) error {
 		calls = append(calls, fired{title, sound})
+		return nil
 	}
 	t.Cleanup(func() { fireFunc = prev })
 	return &calls
@@ -187,5 +190,69 @@ func TestProcessRefiresAfterLeavingDone(t *testing.T) {
 	_ = Process([]sessions.Session{sess("a", sessions.StateDone)})
 	if len(*calls) != 2 {
 		t.Fatalf("expected refire after leaving done, got %d: %v", len(*calls), *calls)
+	}
+}
+
+// TestProcessFireFailureSurfaced verifies a notification that cannot be shown
+// (e.g. permission denied) does not crash, is reported to the caller, and is
+// not retried on the next cycle (graceful degradation).
+func TestProcessFireFailureSurfaced(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var calls int
+	prev := fireFunc
+	fireFunc = func(title, sound string) error {
+		calls++
+		return errors.New("osascript: Not authorized to send Apple events")
+	}
+	t.Cleanup(func() { fireFunc = prev })
+
+	if err := Process([]sessions.Session{sess("a", sessions.StateWorking)}); err != nil {
+		t.Fatalf("first sighting should not error: %v", err)
+	}
+	err := Process([]sessions.Session{sess("a", sessions.StateDone)})
+	if err == nil {
+		t.Fatal("expected a surfaced fire error, got nil")
+	}
+	if !strings.Contains(err.Error(), "could not show") {
+		t.Fatalf("error should be user-visible, got %q", err.Error())
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly one fire attempt, got %d", calls)
+	}
+
+	// A subsequent cycle in the same state must not retry the failed
+	// notification: the snapshot advanced despite the failure.
+	if err := Process([]sessions.Session{sess("a", sessions.StateDone)}); err != nil {
+		t.Fatalf("no transition should not error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("failed notification should not be retried, got %d attempts", calls)
+	}
+}
+
+// TestProcessDedupesIdenticalFireErrors verifies that the same failure across
+// many sessions is collapsed into a single reported error message.
+func TestProcessDedupesIdenticalFireErrors(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	prev := fireFunc
+	fireFunc = func(title, sound string) error {
+		return errors.New("osascript: permission denied")
+	}
+	t.Cleanup(func() { fireFunc = prev })
+
+	working := []sessions.Session{sess("a", sessions.StateWorking), sess("b", sessions.StateWorking)}
+	if err := Process(working); err != nil {
+		t.Fatalf("first sighting should not error: %v", err)
+	}
+	done := []sessions.Session{sess("a", sessions.StateDone), sess("b", sessions.StateDone)}
+	err := Process(done)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if got := strings.Count(err.Error(), "permission denied"); got != 1 {
+		t.Fatalf("identical errors should be deduped, message mentions it %d times: %q", got, err.Error())
+	}
+	if !strings.Contains(err.Error(), "2 notification(s)") {
+		t.Fatalf("error should report the failure count, got %q", err.Error())
 	}
 }

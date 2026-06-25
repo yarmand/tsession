@@ -8,6 +8,8 @@ package notify
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +25,8 @@ const (
 )
 
 // fireFunc is the platform notification sender. It is a package variable so
-// tests can capture invocations.
+// tests can capture invocations. It returns an error when the notification
+// could not be shown so Process can surface the failure rather than crashing.
 var fireFunc = fire
 
 type message struct {
@@ -175,6 +178,7 @@ func Process(ss []sessions.Session) error {
 
 	snap := loadSnapshot(snapPath)
 	seen := make(map[string]bool, len(ss))
+	var fireErrs []error
 
 	for _, s := range ss {
 		seen[s.ID] = true
@@ -187,9 +191,14 @@ func Process(ss []sessions.Session) error {
 		if cur == prev {
 			continue
 		}
+		// Advance the snapshot before firing so a notification that cannot
+		// be shown (permission denied, headless, osascript missing) degrades
+		// gracefully: it is reported once but not retried on every cycle.
 		snap.Entries[s.ID] = cur
 		if msg, ok := messageFor(cur, displayLabel(s)); ok {
-			fireFunc(msg.text, msg.sound)
+			if err := fireFunc(msg.text, msg.sound); err != nil {
+				fireErrs = append(fireErrs, err)
+			}
 		}
 	}
 
@@ -199,5 +208,32 @@ func Process(ss []sessions.Session) error {
 		}
 	}
 
-	return saveSnapshot(snapPath, snap)
+	saveErr := saveSnapshot(snapPath, snap)
+	if len(fireErrs) > 0 {
+		// Collapse repeated identical failures (e.g. the same permission
+		// error for every session) into a single user-visible message.
+		fireErr := fmt.Errorf("could not show %d notification(s): %w",
+			len(fireErrs), errors.Join(dedupeErrs(fireErrs)...))
+		return errors.Join(fireErr, saveErr)
+	}
+	return saveErr
+}
+
+// dedupeErrs removes duplicate error messages while preserving order so a
+// failure affecting many sessions at once is reported only once.
+func dedupeErrs(errs []error) []error {
+	seen := make(map[string]bool, len(errs))
+	out := make([]error, 0, len(errs))
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		key := err.Error()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, err)
+	}
+	return out
 }

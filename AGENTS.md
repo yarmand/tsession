@@ -100,8 +100,8 @@ Pinned to bucket (`exited` always last; otherwise `tmux-attached` → `active no
 
 ```
 tsession list [flags]                        # print recent sessions to stdout
-tsession new <branch> [-- copilot-args]      # create worktree + tmux session, start copilot
-tsession new --path <dir> [-- copilot-args]  # start a session on an existing worktree
+tsession new <branch> [-- copilot-args]         # create worktree + tmux session, start copilot
+tsession new [-p|--path <dir>] [-- copilot-args] # start a session on an existing worktree (defaults to cwd)
 tsession browse [flags] [q]                  # fzf picker in current terminal
 tsession popup [flags]                       # fzf picker designed for tmux popup
 tsession resume [--target=..] <session-id>   # switch tmux pane (or fall back)
@@ -114,8 +114,9 @@ tsession stop-watch                          # stop a running watch process
 ## New Sessions (`new`)
 
 `tsession new <branch>` creates a git worktree, opens a tmux session named
-`basename(worktree-path)`, and starts copilot in it. `tsession new --path <dir>`
-does the same on an existing worktree. Anything after `--` is forwarded to
+`basename(worktree-path)`, and starts copilot in it. `tsession new -p <dir>`
+(or `--path <dir>`) does the same on an existing worktree; with no branch and no
+path it uses the current working directory. Anything after `--` is forwarded to
 copilot.
 
 The worktree-creation commands are configurable via `~/.config/tsession/new-worktree.sh`,

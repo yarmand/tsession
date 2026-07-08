@@ -22,16 +22,13 @@ func splitDashDash(args []string) (before, after []string) {
 	return args, nil
 }
 
-// validateNewArgs enforces that exactly one of branch / path is provided.
+// validateNewArgs rejects providing both a branch and a path. Providing
+// neither is allowed: the caller defaults to the current working directory.
 func validateNewArgs(branch, path string) error {
-	switch {
-	case branch == "" && path == "":
-		return fmt.Errorf("usage: tsession new <branch> | --path <dir>")
-	case branch != "" && path != "":
+	if branch != "" && path != "" {
 		return fmt.Errorf("provide either a branch or --path, not both")
-	default:
-		return nil
 	}
+	return nil
 }
 
 // buildCopilotCommand builds the shell command run inside the tmux session.
@@ -45,26 +42,43 @@ func buildCopilotCommand(extra []string) string {
 	return cmd
 }
 
+// parseNewArgs parses the pre-`--` args for `new`, returning the branch and the
+// resolved path. When neither a branch nor a path is given, path defaults to the
+// current working directory ("."). Both -p and --path set the path.
+func parseNewArgs(before []string) (branch, path string, err error) {
+	fs := flag.NewFlagSet("new", flag.ContinueOnError)
+	fs.StringVar(&path, "path", "", "use an existing worktree at this directory instead of creating one")
+	fs.StringVar(&path, "p", "", "shorthand for --path")
+	if err = fs.Parse(before); err != nil {
+		return "", "", err
+	}
+	branch = fs.Arg(0)
+
+	if err = validateNewArgs(branch, path); err != nil {
+		return "", "", err
+	}
+	if branch == "" && path == "" {
+		path = "."
+	}
+	return branch, path, nil
+}
+
 // New implements `tsession new`: create (or reuse) a git worktree, open a tmux
 // session in it, and start copilot there.
 //
 //	tsession new <branch> [-- <copilot-args>...]
-//	tsession new --path <dir> [-- <copilot-args>...]
+//	tsession new [-p|--path <dir>] [-- <copilot-args>...]
+//
+// With no branch and no path, the current working directory is used.
 func New(args []string) error {
 	before, copilotArgs := splitDashDash(args)
 
-	fs := flag.NewFlagSet("new", flag.ContinueOnError)
-	path := fs.String("path", "", "use an existing worktree at this directory instead of creating one")
-	if err := fs.Parse(before); err != nil {
-		return err
-	}
-	branch := fs.Arg(0)
-
-	if err := validateNewArgs(branch, *path); err != nil {
+	branch, path, err := parseNewArgs(before)
+	if err != nil {
 		return err
 	}
 
-	wtPath, err := resolveWorktreePath(branch, *path)
+	wtPath, err := resolveWorktreePath(branch, path)
 	if err != nil {
 		return err
 	}

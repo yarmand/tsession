@@ -193,7 +193,7 @@ func loadAllWithRemotes(maxAge time.Duration, noCache bool, localOnly bool) (loc
 		return local, remoteMap, nil, nil, nil
 	}
 
-	remoteMap, warnings = fetchRemoteSessions(context.Background(), cfg.Remotes, maxAge, 10*time.Second)
+	remoteMap, warnings = fetchRemoteSessions(context.Background(), cfg.Remotes, maxAge, 10*time.Second, remote.FetchOptions{})
 	for _, r := range cfg.Remotes {
 		if _, ok := remoteMap[r.Name]; ok {
 			remoteNames = append(remoteNames, r.Name)

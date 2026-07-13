@@ -39,6 +39,22 @@ func Serve(in io.Reader, out io.Writer) error {
 	}
 }
 
+// ServeOneShot handles a single RPC method invocation without an
+// interactive stdio loop, writing exactly one JSON RPCResponse line to out.
+// It backs `tsession remote rpc <method>`, used by the local client to
+// request a snapshot (or health check) over a fresh SSH-style exec.
+func ServeOneShot(method string, out io.Writer) error {
+	resp := handleRequest(RPCRequest{Method: method})
+	enc := json.NewEncoder(out)
+	if !resp.OK {
+		if err := enc.Encode(resp); err != nil {
+			return err
+		}
+		return fmt.Errorf("remote rpc %s: %s", method, resp.Error)
+	}
+	return enc.Encode(resp)
+}
+
 func handleRequest(req RPCRequest) RPCResponse {
 	switch req.Method {
 	case "health":

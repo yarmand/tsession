@@ -252,3 +252,17 @@ are skipped with a warning without blocking the local cache update.
 - **sqlite3 not found:** The remote is skipped. Install `sqlite3` on the remote.
 - **Slow SSH:** Ensure `ControlMaster` is configured in `~/.ssh/config` for
   persistent connections. The gather script completes in <1s on most hosts.
+
+## Releases
+
+Push a version tag (`vX.Y.Z`) to trigger `.github/workflows/release.yml`.
+The workflow cross-compiles and publishes:
+
+- `tsession_<tag>_linux_amd64.tar.gz`
+- `tsession_<tag>_linux_arm64.tar.gz`
+- `tsession_<tag>_darwin_arm64.tar.gz`
+
+Each archive contains a single `tsession` binary. Assets are attached to the
+GitHub release for that tag, so tools can fetch an exact tag's asset directly
+or fall back to the latest release when resolving a binary for the current
+platform.

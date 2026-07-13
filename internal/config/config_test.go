@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+func TestLoadRemotes_ActiveDefaultsTrue(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	err := os.WriteFile(cfgPath, []byte(`remotes:
+  - name: devbox
+    host: devbox.local
+  - name: standby
+    host: standby.local
+    active: false
+`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Remotes[0].Active {
+		t.Fatalf("remote[0].Active = %v, want true", cfg.Remotes[0].Active)
+	}
+	if cfg.Remotes[1].Active {
+		t.Fatalf("remote[1].Active = %v, want false", cfg.Remotes[1].Active)
+	}
+}
+
 func TestLoadRemotes(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

@@ -2,9 +2,11 @@ package tmux
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Client struct {
@@ -26,6 +28,12 @@ var pickClientOutput = func(input string) ([]byte, error) {
 	cmd.Stderr = os.Stderr
 	return cmd.Output()
 }
+
+var waitForTargetClient = func() {
+	time.Sleep(time.Second)
+}
+
+var targetWaitOutput io.Writer = os.Stderr
 
 func ParseClients(raw string) []Client {
 	var out []Client
@@ -51,13 +59,21 @@ func FilterTargetClients(in []Client, excludedSession string) []Client {
 }
 
 func pickTargetClient() (string, error) {
-	raw, err := listClientsOutput()
-	if err != nil {
-		return "", fmt.Errorf("list clients: %w", err)
-	}
-	clients := FilterTargetClients(ParseClients(string(raw)), "session-nav")
-	if len(clients) == 0 {
-		return "", fmt.Errorf("no non-navigation tmux clients found")
+	var clients []Client
+	waiting := false
+	for len(clients) == 0 {
+		raw, err := listClientsOutput()
+		if err != nil {
+			return "", fmt.Errorf("list clients: %w", err)
+		}
+		clients = FilterTargetClients(ParseClients(string(raw)), "session-nav")
+		if len(clients) == 0 {
+			if !waiting {
+				fmt.Fprintln(targetWaitOutput, "Waiting for a non-navigation tmux client; open or attach one to continue...")
+				waiting = true
+			}
+			waitForTargetClient()
+		}
 	}
 	lines := make([]string, 0, len(clients))
 	for _, client := range clients {

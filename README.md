@@ -153,11 +153,17 @@ remotes:
   # Plain SSH remote
   - name: devbox
     host: devbox.local
+    active: true
 
   # SSH with custom path
   - name: server
     host: user@server.example.com
     copilot_dir: /home/user/.copilot
+
+  # Keep configured but disable temporarily
+  - name: offline-lab
+    host: offline.example.com
+    active: false
 
   # GitHub Codespace
   - name: my-codespace
@@ -189,6 +195,7 @@ remotes:
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `name` | yes | — | Label shown in the section header |
+| `active` | no | `true` | Whether this remote is used. Set `false` to keep it configured but skipped. |
 | `type` | no | `ssh` | Remote type: `ssh`, `codespace`, or `devcontainer` |
 | `host` | type=ssh | — | SSH destination (user@host or ssh-config alias) |
 | `ssh_command` | no | `ssh` | Custom SSH binary/command (type=ssh only) |

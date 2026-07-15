@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +23,15 @@ type Pane struct {
 	Title       string // terminal title (set by running app, e.g. copilot session summary)
 }
 
+var listTmuxOutput = func(args ...string) ([]byte, error) {
+	return exec.Command("tmux", args...).Output()
+}
+
+func Available() bool {
+	_, err := exec.LookPath("tmux")
+	return err == nil
+}
+
 // Target returns the tmux target string for this pane, suitable for
 // `tmux switch-client -t` / `tmux attach-session -t`.
 func (p Pane) Target() string {
@@ -29,10 +39,12 @@ func (p Pane) Target() string {
 }
 
 func ListSessions() ([]Session, error) {
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_path}")
-	out, err := cmd.Output()
+	out, err := listTmuxOutput("list-sessions", "-F", "#{session_name}|#{session_path}")
 	if err != nil {
-		return nil, nil
+		if noTmuxServer(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return parseListSessions(string(out)), nil
 }
@@ -152,12 +164,24 @@ func RenameSession(oldName, newName string) error {
 // session that contains it (by walking the process tree up from the
 // Copilot PID until an ancestor matches a pane PID).
 func ListPanes() ([]Pane, error) {
-	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{session_name}|#{window_index}|#{pane_index}|#{pane_pid}")
-	out, err := cmd.Output()
+	out, err := listTmuxOutput("list-panes", "-a", "-F", "#{session_name}|#{window_index}|#{pane_index}|#{pane_pid}")
 	if err != nil {
-		return nil, nil
+		if noTmuxServer(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return parseListPanes(string(out)), nil
+}
+
+func noTmuxServer(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	stderr := strings.ToLower(string(exitErr.Stderr))
+	return strings.Contains(stderr, "no server running") ||
+		strings.Contains(stderr, "failed to connect to server")
 }
 
 // ListPanesWithTitle returns panes including the pane title.

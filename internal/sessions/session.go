@@ -34,16 +34,18 @@ func (s State) String() string {
 }
 
 type Session struct {
-	ID          string
-	CWD         string
-	Repository  string
-	Summary     string
-	UpdatedAt   time.Time
-	LastEventAt time.Time
-	State       State
-	TmuxName    string
-	TmuxTarget  string
-	Name        string // user-defined display name (from ~/.tsession/names.json)
-	Source      string // "copilot" or "pi"
-	Origin      string // "" = local, otherwise remote name from config
+	ID                  string
+	CWD                 string
+	Repository          string
+	Summary             string
+	UpdatedAt           time.Time
+	LastEventAt         time.Time
+	State               State
+	TmuxName            string
+	TmuxTarget          string
+	RemoteTmuxTarget    string
+	RemoteTmuxAvailable bool
+	Name                string // user-defined display name (from ~/.tsession/names.json)
+	Source              string // "copilot" or "pi"
+	Origin              string // "" = local, otherwise remote name from config
 }

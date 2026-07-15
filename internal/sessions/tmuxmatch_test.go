@@ -34,12 +34,15 @@ func TestResolveTmuxByPID_WalksAncestorsToPane(t *testing.T) {
 func TestResolveTmuxByPID_PreservesExistingTmuxName(t *testing.T) {
 	sess := []Session{{ID: "alpha", TmuxName: "already-set"}}
 	sd := []StateDirInfo{{ID: "alpha", PID: 400}}
-	panes := []tmux.Pane{{SessionName: "by-pid", PID: 400}}
+	panes := []tmux.Pane{{SessionName: "by-pid", WindowIndex: "2", PaneIndex: "1", PID: 400}}
 	ppid := map[int]int{400: 1}
 
 	got := ResolveTmuxByPIDWithTree(sess, sd, panes, ppid)
 	if got[0].TmuxName != "already-set" {
 		t.Errorf("should not overwrite, got %q", got[0].TmuxName)
+	}
+	if got[0].TmuxTarget != "by-pid:2.1" {
+		t.Errorf("should fill exact pane target, got %q", got[0].TmuxTarget)
 	}
 }
 

@@ -43,7 +43,7 @@ func ResolveTmuxByPIDWithTree(sess []Session, sd []StateDirInfo, panes []tmux.Pa
 	}
 
 	for i := range sess {
-		if sess[i].TmuxName != "" {
+		if sess[i].TmuxTarget != "" {
 			continue
 		}
 		pid, ok := pidBySession[sess[i].ID]
@@ -51,7 +51,9 @@ func ResolveTmuxByPIDWithTree(sess []Session, sd []StateDirInfo, panes []tmux.Pa
 			continue
 		}
 		if pane, ok := walkToPane(pid, processTree, paneByPID); ok {
-			sess[i].TmuxName = pane.SessionName
+			if sess[i].TmuxName == "" {
+				sess[i].TmuxName = pane.SessionName
+			}
 			sess[i].TmuxTarget = pane.Target()
 		}
 	}

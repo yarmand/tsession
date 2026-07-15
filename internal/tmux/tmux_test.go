@@ -1,6 +1,10 @@
 package tmux
 
-import "testing"
+import (
+	"errors"
+	"os/exec"
+	"testing"
+)
 
 func TestParseListSessions(t *testing.T) {
 	out := "alpha|/Users/x/alpha\nbeta|/Users/x/beta\n"
@@ -22,6 +26,40 @@ func TestParseListSessions_EmptyAndBlankLines(t *testing.T) {
 	}
 	if got := parseListSessions("\n\n  \n"); len(got) != 0 {
 		t.Errorf("want empty, got %+v", got)
+	}
+}
+
+func TestListSessionsPropagatesUnexpectedCommandError(t *testing.T) {
+	oldOutput := listTmuxOutput
+	t.Cleanup(func() { listTmuxOutput = oldOutput })
+	listTmuxOutput = func(...string) ([]byte, error) {
+		return nil, errors.New("permission denied")
+	}
+
+	if _, err := ListSessions(); err == nil {
+		t.Fatal("expected tmux list-sessions error")
+	}
+}
+
+func TestListPanesPropagatesUnexpectedCommandError(t *testing.T) {
+	oldOutput := listTmuxOutput
+	t.Cleanup(func() { listTmuxOutput = oldOutput })
+	listTmuxOutput = func(...string) ([]byte, error) {
+		return nil, errors.New("permission denied")
+	}
+
+	if _, err := ListPanes(); err == nil {
+		t.Fatal("expected tmux list-panes error")
+	}
+}
+
+func TestNoTmuxServerRecognizesMissingServer(t *testing.T) {
+	err := &exec.ExitError{Stderr: []byte("no server running on /tmp/tmux-501/default")}
+	if !noTmuxServer(err) {
+		t.Fatal("missing tmux server was not recognized")
+	}
+	if noTmuxServer(errors.New("permission denied")) {
+		t.Fatal("unexpected command error was treated as a missing server")
 	}
 }
 
@@ -65,11 +103,11 @@ func TestSplitNonEmpty(t *testing.T) {
 
 func TestResolveSessionName(t *testing.T) {
 	cases := []struct {
-		name     string
-		desired  string
-		path     string
-		existing []Session
-		wantName string
+		name       string
+		desired    string
+		path       string
+		existing   []Session
+		wantName   string
 		wantResume bool
 	}{
 		{

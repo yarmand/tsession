@@ -18,6 +18,13 @@ import (
 // when assembling a snapshot (mirrors the local `list` default).
 const defaultSnapshotMaxAge = 14 * 24 * time.Hour
 
+var (
+	tmuxAvailable       = tmux.Available
+	listTmuxSessions    = tmux.ListSessions
+	listTmuxPanes       = tmux.ListPanes
+	loadLocalSessionsFn = loadLocalSessions
+)
+
 // Serve reads newline-delimited RPCRequest JSON objects from in, dispatches
 // them, and writes newline-delimited RPCResponse JSON objects to out. It
 // returns nil on a clean EOF from in.
@@ -79,35 +86,38 @@ func handleRequest(req RPCRequest) RPCResponse {
 // and returns only the active ones, per the daemon's active-only filtering
 // contract: state != exited && state != unknown && state != inactive-idle.
 func BuildActiveSnapshot(now time.Time) (SnapshotPayload, error) {
-	all, err := loadLocalSessions(defaultSnapshotMaxAge)
+	all, available, err := loadLocalSessionsFn(defaultSnapshotMaxAge)
 	if err != nil {
 		return SnapshotPayload{}, err
 	}
 
-	active := make([]SessionPayload, 0, len(all))
+	payload := SnapshotPayload{
+		TmuxAvailable: available,
+		Sessions:      make([]SessionPayload, 0, len(all)),
+	}
 	for _, s := range all {
 		if s.State == sessions.StateExited || s.State == sessions.StateUnknown || s.State == sessions.StateInactiveIdle {
 			continue
 		}
-		active = append(active, sessionToPayload(s))
+		payload.Sessions = append(payload.Sessions, sessionToPayload(s))
 	}
-	return SnapshotPayload{Sessions: active}, nil
+	return payload, nil
 }
 
 // loadLocalSessions mirrors cmd.loadAllLive: it loads the daemon host's own
 // Copilot + pi sessions. It lives here (rather than being shared with cmd)
 // to avoid an import cycle, since cmd imports internal/remote.
-func loadLocalSessions(maxAge time.Duration) ([]sessions.Session, error) {
+func loadLocalSessions(maxAge time.Duration) ([]sessions.Session, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	dbPath := filepath.Join(home, ".copilot", "session-store.db")
 	stateRoot := filepath.Join(home, ".copilot", "session-state")
 
 	store, err := sessions.LoadRecent(dbPath, maxAge)
 	if err != nil {
-		return nil, fmt.Errorf("load session store: %w", err)
+		return nil, false, fmt.Errorf("load session store: %w", err)
 	}
 
 	knownIDs := make(map[string]bool, len(store))
@@ -123,13 +133,21 @@ func loadLocalSessions(maxAge time.Duration) ([]sessions.Session, error) {
 	}
 	sd, err := sessions.LoadStateDirsForIDs(stateRoot, ids)
 	if err != nil {
-		return nil, fmt.Errorf("load state dirs: %w", err)
+		return nil, false, fmt.Errorf("load state dirs: %w", err)
 	}
-	tx, err := tmux.ListSessions()
-	if err != nil {
-		return nil, fmt.Errorf("list tmux: %w", err)
+	available := tmuxAvailable()
+	var tx []tmux.Session
+	var panes []tmux.Pane
+	if available {
+		tx, err = listTmuxSessions()
+		if err != nil {
+			return nil, false, fmt.Errorf("list tmux: %w", err)
+		}
+		panes, err = listTmuxPanes()
+		if err != nil {
+			return nil, false, fmt.Errorf("list tmux panes: %w", err)
+		}
 	}
-	panes, _ := tmux.ListPanes()
 	merged := sessions.Merge(store, sd, tx)
 	merged = sessions.ResolveTmuxByPID(merged, sd, panes)
 
@@ -154,5 +172,5 @@ func loadLocalSessions(maxAge time.Duration) ([]sessions.Session, error) {
 		merged = append(merged, piFiltered...)
 	}
 
-	return merged, nil
+	return merged, available, nil
 }

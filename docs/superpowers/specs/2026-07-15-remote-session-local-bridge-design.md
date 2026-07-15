@@ -31,20 +31,48 @@ target, and the selected client has nothing persistent to switch to.
 
 ## Decisions
 
-1. Use one deterministic local bridge tmux session per remote session.
-2. Reuse the same bridge from any local target client.
-3. Keep the picker in its own `session-nav` tmux session.
-4. Switch only the selected local tmux client to the bridge.
-5. Prefer attaching to the exact existing remote tmux pane.
-6. If remote tmux exists but the session has no target, create or reuse a
+1. Fix `--target pick` before implementing remote bridges.
+2. Use one deterministic local bridge tmux session per remote session.
+3. Reuse the same bridge from any local target client.
+4. Keep the picker in its own `session-nav` tmux session.
+5. Switch only the selected local tmux client to the bridge.
+6. Prefer attaching to the exact existing remote tmux pane.
+7. If remote tmux exists but the session has no target, create or reuse a
    deterministic remote tmux session running `copilot --resume=<id>`.
-7. If remote tmux is unavailable, run `copilot --resume=<id>` directly.
-8. Enable local tmux `remain-on-exit` for the bridge pane.
-9. After disconnection, retain the dead bridge pane as a reconnect screen.
-10. Selecting the session again respawns a dead bridge connection.
-11. Leaving a bridge never terminates a remote tmux session.
+8. If remote tmux is unavailable, run `copilot --resume=<id>` directly.
+9. Enable local tmux `remain-on-exit` for the bridge pane.
+10. After disconnection, retain the dead bridge pane as a reconnect screen.
+11. Selecting the session again respawns a dead bridge connection.
+12. Leaving a bridge never terminates a remote tmux session.
 
 ## Architecture
+
+### Prerequisite: restore target-client selection
+
+The current non-watch browse path resumes a selection twice:
+
+1. The fzf `enter` binding executes `tsession resume --target=<resolved-tty>`.
+2. After fzf accepts, `Browse` calls `Resume([]string{id})` without the target.
+
+The second call switches the navigation client and makes `--target` appear
+ineffective. Fix this before adding bridge behavior:
+
+- Inside tmux, the fzf `enter` binding remains the single owner of resume and
+  target switching.
+- After fzf returns in non-watch mode, `Browse` must not resume the accepted ID
+  again.
+- Outside tmux behavior may continue returning an accepted ID for its caller,
+  but must have one explicit resume owner.
+
+Explicit `--target pick` must always show a client picker, even when only one
+eligible non-navigation client exists. The picker excludes:
+
+- the client currently displaying `session-nav`;
+- clients without a usable TTY.
+
+The selected TTY is resolved once when browse starts and is passed unchanged to
+every resume action during that browse process. Direct `--target=/dev/...`
+continues to bypass the picker.
 
 ### Remote snapshot metadata
 
@@ -236,6 +264,10 @@ inside the transport remain visible in the retained bridge pane.
 
 ### Resume integration
 
+- Explicit `--target pick` always opens the client picker.
+- The navigation client is excluded from target candidates.
+- Non-watch selection performs exactly one resume with the resolved target.
+- Watch selection reuses the same resolved target across selections.
 - Remote fzf selection creates a bridge and switches the requested client.
 - Selecting the same remote session twice reuses one bridge.
 - A disconnected bridge reconnects on the next selection.

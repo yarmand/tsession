@@ -74,6 +74,11 @@ The selected TTY is resolved once when browse starts and is passed unchanged to
 every resume action during that browse process. Direct `--target=/dev/...`
 continues to bypass the picker.
 
+Re-entering `tsession browse` from outside tmux must apply the new invocation's
+arguments even when `session-nav` already exists. The launcher must restart the
+navigator pane with the new browse command before attaching; `tmux new-session
+-A` must not silently reuse an older browse process with stale flags.
+
 ### Remote snapshot metadata
 
 Extend the snapshot protocol with host and session attachment metadata:

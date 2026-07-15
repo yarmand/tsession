@@ -72,3 +72,21 @@ func TestResolveRelease_NoMatchingAssetErrors(t *testing.T) {
 		t.Fatal("expected error when no asset matches runtime")
 	}
 }
+
+func TestFindRuntimeAsset_MatchesPublishedAssetNaming(t *testing.T) {
+	rel := release{
+		TagName: "v0.5.0",
+		Assets: []releaseAsset{{
+			Name:        "tsession_v0.5.0_linux_amd64.tar.gz",
+			DownloadURL: "https://example/linux-amd64",
+		}},
+	}
+
+	got, ok := findRuntimeAsset(rel, "linux-amd64")
+	if !ok {
+		t.Fatal("expected published linux_amd64 asset to match linux-amd64 runtime")
+	}
+	if got.DownloadURL != "https://example/linux-amd64" {
+		t.Fatalf("download URL = %q, want published asset URL", got.DownloadURL)
+	}
+}

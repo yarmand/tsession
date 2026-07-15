@@ -90,45 +90,7 @@ func ResolveTarget(target string) (string, error) {
 	if strings.HasPrefix(target, "/dev/") {
 		return target, nil
 	}
-	// Any other value (e.g. "pick", "?") triggers interactive selection.
-	return pickClient()
-}
-
-// pickClient shows tmux clients and lets the user choose one via fzf.
-func pickClient() (string, error) {
-	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_tty} #{session_name}").Output()
-	if err != nil {
-		return "", fmt.Errorf("list-clients failed: %w", err)
-	}
-	lines := splitNonEmpty(string(out))
-	if len(lines) == 0 {
-		return "", fmt.Errorf("no tmux clients found")
-	}
-	if len(lines) == 1 {
-		// Only one client — use it directly.
-		return strings.Fields(lines[0])[0], nil
-	}
-
-	// Use fzf if available, otherwise just pick the first non-current client.
-	fzfPath, fzfErr := exec.LookPath("fzf")
-	if fzfErr != nil {
-		// No fzf — return first client.
-		return strings.Fields(lines[0])[0], nil
-	}
-
-	input := strings.Join(lines, "\n")
-	cmd := exec.Command(fzfPath, "--prompt=target client> ", "--no-info", "--reverse")
-	cmd.Stdin = strings.NewReader(input)
-	cmd.Stderr = os.Stderr
-	selected, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("fzf cancelled")
-	}
-	fields := strings.Fields(strings.TrimSpace(string(selected)))
-	if len(fields) == 0 {
-		return "", fmt.Errorf("no client selected")
-	}
-	return fields[0], nil
+	return pickTargetClient()
 }
 
 func splitNonEmpty(s string) []string {

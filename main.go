@@ -35,6 +35,8 @@ func main() {
 		err = cmd.Vscode(args)
 	case "rename":
 		err = cmd.Rename(args)
+	case "remote":
+		err = cmd.Remote(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -61,6 +63,7 @@ Usage:
   tsession resume [--target=..] <session-id>  Switch tmux to session
   tsession rename <session-id> [name]         Rename a session
   tsession vscode <session-id> Open session directory in VS Code
+  tsession remote serve        Run the remote RPC daemon (used over SSH)
   tsession watch [--daemon]    Refresh ~/.tsession/cache.json every --interval (default 10s)
   tsession stop-watch          Stop a running watch process
   tsession -h                  Show this help`)

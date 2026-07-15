@@ -12,6 +12,7 @@ const defaultCopilotDir = "~/.copilot"
 
 type Remote struct {
 	Name       string
+	Active     bool
 	Type       string // "ssh" (default), "codespace", "devcontainer"
 	Host       string
 	CopilotDir string
@@ -132,6 +133,7 @@ func parse(s string) (*Config, error) {
 			}
 			current = &Remote{
 				Name:       extractValue(trimmed[len("- name:"):]),
+				Active:     true,
 				CopilotDir: defaultCopilotDir,
 				Type:       "ssh",
 			}
@@ -142,6 +144,9 @@ func parse(s string) (*Config, error) {
 			switch {
 			case strings.HasPrefix(trimmed, "host:"):
 				current.Host = extractValue(trimmed[len("host:"):])
+			case strings.HasPrefix(trimmed, "active:"):
+				v := strings.ToLower(extractValue(trimmed[len("active:"):]))
+				current.Active = v != "false"
 			case strings.HasPrefix(trimmed, "type:"):
 				if v := extractValue(trimmed[len("type:"):]); v != "" {
 					current.Type = v

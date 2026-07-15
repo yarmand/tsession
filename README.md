@@ -153,11 +153,17 @@ remotes:
   # Plain SSH remote
   - name: devbox
     host: devbox.local
+    active: true
 
   # SSH with custom path
   - name: server
     host: user@server.example.com
     copilot_dir: /home/user/.copilot
+
+  # Keep configured but disable temporarily
+  - name: offline-lab
+    host: offline.example.com
+    active: false
 
   # GitHub Codespace
   - name: my-codespace
@@ -189,6 +195,7 @@ remotes:
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `name` | yes | — | Label shown in the section header |
+| `active` | no | `true` | Whether this remote is used. Set `false` to keep it configured but skipped. |
 | `type` | no | `ssh` | Remote type: `ssh`, `codespace`, or `devcontainer` |
 | `host` | type=ssh | — | SSH destination (user@host or ssh-config alias) |
 | `ssh_command` | no | `ssh` | Custom SSH binary/command (type=ssh only) |
@@ -252,3 +259,17 @@ are skipped with a warning without blocking the local cache update.
 - **sqlite3 not found:** The remote is skipped. Install `sqlite3` on the remote.
 - **Slow SSH:** Ensure `ControlMaster` is configured in `~/.ssh/config` for
   persistent connections. The gather script completes in <1s on most hosts.
+
+## Releases
+
+Push a version tag (`vX.Y.Z`) to trigger `.github/workflows/release.yml`.
+The workflow cross-compiles and publishes:
+
+- `tsession_<tag>_linux_amd64.tar.gz`
+- `tsession_<tag>_linux_arm64.tar.gz`
+- `tsession_<tag>_darwin_arm64.tar.gz`
+
+Each archive contains a single `tsession` binary. Assets are attached to the
+GitHub release for that tag, so tools can fetch an exact tag's asset directly
+or fall back to the latest release when resolving a binary for the current
+platform.

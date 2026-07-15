@@ -18,6 +18,7 @@ import (
 	"github.com/yarma/tsession/internal/cache"
 	"github.com/yarma/tsession/internal/notify"
 	"github.com/yarma/tsession/internal/pisessions"
+	"github.com/yarma/tsession/internal/remote"
 	"github.com/yarma/tsession/internal/sessions"
 	"github.com/yarma/tsession/internal/tmux"
 )
@@ -115,7 +116,7 @@ func refresh(interval, maxAge time.Duration, notifyEnabled bool) error {
 		return err
 	}
 	if len(cfg.Remotes) > 0 {
-		remoteMap, warnings := fetchRemoteSessions(context.Background(), cfg.Remotes, maxAge, 10*time.Second)
+		remoteMap, warnings := fetchRemoteSessions(context.Background(), cfg.Remotes, maxAge, 10*time.Second, remote.FetchOptions{})
 		for _, warning := range warnings {
 			fmt.Fprintln(os.Stderr, "warning:", warning)
 		}

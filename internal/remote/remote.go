@@ -102,7 +102,7 @@ func Fetch(ctx context.Context, remote config.Remote, maxAge time.Duration) (*Ga
 	return ParseGatherOutput(stdout.Bytes())
 }
 
-func FetchAll(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration) (map[string][]sessions.Session, []string) {
+func FetchAll(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts FetchOptions) (map[string][]sessions.Session, []string) {
 	out := make(map[string][]sessions.Session, len(remotes))
 	if len(remotes) == 0 {
 		return out, nil
@@ -121,12 +121,11 @@ func FetchAll(ctx context.Context, remotes []config.Remote, maxAge, timeout time
 			}
 			defer cancel()
 
-			gr, err := Fetch(fetchCtx, remote, maxAge)
+			sess, err := EnsureDaemonAndSnapshot(fetchCtx, remote, opts, maxAge)
 			if err != nil {
 				warningsByIndex[i] = fmt.Sprintf("remote %s: %v", remote.Name, err)
 				return
 			}
-			sess := gr.ToSessions(remote.Name, maxAge)
 			mu.Lock()
 			out[remote.Name] = sess
 			mu.Unlock()

@@ -12,6 +12,7 @@ import (
 
 	"github.com/yarma/tsession/internal/cache"
 	"github.com/yarma/tsession/internal/config"
+	"github.com/yarma/tsession/internal/remote"
 	"github.com/yarma/tsession/internal/sessions"
 )
 
@@ -58,7 +59,7 @@ func TestLoadAllWithRemotes_ConfigOrder(t *testing.T) {
 
 	oldFetch := fetchRemoteSessions
 	defer func() { fetchRemoteSessions = oldFetch }()
-	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration) (map[string][]sessions.Session, []string) {
+	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts remote.FetchOptions) (map[string][]sessions.Session, []string) {
 		if timeout != 10*time.Second {
 			t.Fatalf("timeout = %v, want 10s", timeout)
 		}
@@ -109,7 +110,7 @@ func TestLoadAllWithRemotes_FiltersCachedRemoteSessionsFromLocal(t *testing.T) {
 
 	oldFetch := fetchRemoteSessions
 	defer func() { fetchRemoteSessions = oldFetch }()
-	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration) (map[string][]sessions.Session, []string) {
+	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts remote.FetchOptions) (map[string][]sessions.Session, []string) {
 		return map[string][]sessions.Session{"devbox": {testSession("remote")}}, nil
 	}
 
@@ -141,7 +142,7 @@ func TestInitialListBytes_IncludesSectionDividers(t *testing.T) {
 
 	oldFetch := fetchRemoteSessions
 	defer func() { fetchRemoteSessions = oldFetch }()
-	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration) (map[string][]sessions.Session, []string) {
+	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts remote.FetchOptions) (map[string][]sessions.Session, []string) {
 		return map[string][]sessions.Session{"devbox": {testSession("remote")}}, nil
 	}
 
@@ -243,7 +244,7 @@ func TestRefresh_WritesRemoteSessionsToCache(t *testing.T) {
 
 	oldFetch := fetchRemoteSessions
 	defer func() { fetchRemoteSessions = oldFetch }()
-	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration) (map[string][]sessions.Session, []string) {
+	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts remote.FetchOptions) (map[string][]sessions.Session, []string) {
 		return map[string][]sessions.Session{
 			"ci":     {testSession("remote-ci")},
 			"devbox": {testSession("remote-devbox")},

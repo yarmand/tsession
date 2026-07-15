@@ -161,32 +161,6 @@ func TestInitialListBytes_IncludesSectionDividers(t *testing.T) {
 	}
 }
 
-func TestRemoteResumeArgs(t *testing.T) {
-	// SSH — always just runs copilot resume on remote (no tmux wrapping)
-	sshRemote := config.Remote{Name: "devbox", Host: "devbox", Type: "ssh"}
-	got := remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, sshRemote)
-	want := []string{"ssh", "-t", "devbox", "copilot --resume=abcdefgh-1234"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ssh resume = %v, want %v", got, want)
-	}
-
-	// Codespace
-	csRemote := config.Remote{Name: "cs", Type: "codespace", Codespace: "my-cs"}
-	got = remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, csRemote)
-	want = []string{"gh", "codespace", "ssh", "--codespace", "my-cs", "-t", "--", "copilot --resume=abcdefgh-1234"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("codespace resume = %v, want %v", got, want)
-	}
-
-	// Devcontainer
-	dcRemote := config.Remote{Name: "dc", Type: "devcontainer", Container: "myapp", User: "vscode"}
-	got = remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, dcRemote)
-	want = []string{"docker", "exec", "-it", "-u", "vscode", "myapp", "copilot --resume=abcdefgh-1234"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("devcontainer resume = %v, want %v", got, want)
-	}
-}
-
 func TestResume_RemoteSessionUsesSSHFromCache(t *testing.T) {
 	writeConfigFile(t, `remotes:
   - name: devbox

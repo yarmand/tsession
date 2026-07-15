@@ -307,16 +307,21 @@ func asExit(err error, target **exec.ExitError) bool {
 // accepts the selection and exits (attach cannot work without a tmux client).
 func enterBinding(self, target string) string {
 	if tmux.InTmux() {
-		resumeCmd := shellQuote(self) + " resume"
-		if target != "" {
-			resumeCmd += " --target=" + shellQuote(target)
-		}
-		// {10} is session origin (remote name), {8} is summary.
-		// fzf shell-quotes field replacements automatically.
-		resumeCmd += " --origin {10} --summary {8} {2}"
-		return "--bind=enter:execute-silent(" + resumeCmd + ")+accept"
+		return "--bind=enter:execute-silent(" + resumeBindingCommand(self, target) + ")+accept"
 	}
 	return "--bind=enter:accept"
+}
+
+func resumeBindingCommand(self, target string) string {
+	resumeCmd := shellQuote(self) + " resume"
+	if target != "" {
+		resumeCmd += " --target=" + shellQuote(target)
+	}
+	// {10} is session origin (remote name), {8} is summary.
+	// fzf shell-quotes field replacements automatically.
+	resumeCmd += " --origin {10} --summary {8} {2}"
+	script := `err=$("$@" 2>&1) || tmux display-message "tsession: $err"`
+	return "sh -c " + shellQuote(script) + " _ " + resumeCmd
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quotes,

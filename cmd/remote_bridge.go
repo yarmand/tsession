@@ -2,13 +2,19 @@ package cmd
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"unicode"
 
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/tmux"
 )
+
+var ensureBridgeFn = tmux.EnsureBridge
+var switchClientTargetFn = tmux.SwitchClientTarget
 
 func remoteBridgeName(origin, sessionID string) string {
 	var b strings.Builder
@@ -32,6 +38,11 @@ func remoteBridgeName(origin, sessionID string) string {
 	}
 	sum := sha256.Sum256([]byte(origin + "\x00" + sessionID))
 	return fmt.Sprintf("tsession-r-%s-%x", clean, sum[:6])
+}
+
+func remoteBridgeAlternateName(origin, sessionID string) string {
+	sum := sha256.Sum256([]byte(origin + "\x00" + sessionID))
+	return fmt.Sprintf("%s-%x", remoteBridgeName(origin, sessionID), sum[6:10])
 }
 
 func remoteFallbackTmuxName(sessionID string) string {
@@ -75,4 +86,37 @@ func remoteBridgeCommand(s sessions.Session, r config.Remote) (string, []string,
 	default:
 		return "", nil, fmt.Errorf("unsupported remote type %q", r.Type)
 	}
+}
+
+func ensureRemoteBridge(s sessions.Session, r config.Remote) (string, error) {
+	bin, args, err := remoteBridgeCommand(s, r)
+	if err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve bridge home: %w", err)
+	}
+	spec := tmux.BridgeSpec{
+		Name:      remoteBridgeName(s.Origin, s.ID),
+		Path:      home,
+		Command:   shellJoin(append([]string{bin}, args...)),
+		Origin:    s.Origin,
+		SessionID: s.ID,
+	}
+	bridge, err := ensureBridgeFn(spec)
+	var collision *tmux.BridgeCollisionError
+	if !errors.As(err, &collision) {
+		return bridge, err
+	}
+	spec.Name = remoteBridgeAlternateName(s.Origin, s.ID)
+	return ensureBridgeFn(spec)
+}
+
+func shellJoin(args []string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = shellQuote(arg)
+	}
+	return strings.Join(quoted, " ")
 }

@@ -52,3 +52,19 @@ func TestLaunchInTmuxRespawnsExistingNavigatorWithCurrentArgs(t *testing.T) {
 		t.Fatalf("interactive calls = %v", interactive)
 	}
 }
+
+func TestEnterBindingRoutesTargetAndDisplaysResumeErrors(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux/default,1,0")
+	got := enterBinding("/tmp/tsession", "/dev/ttys001")
+	for _, want := range []string{
+		"execute-silent(",
+		"'/tmp/tsession' resume",
+		"--target='/dev/ttys001'",
+		"tmux display-message",
+		"tsession: $err",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("binding %q does not contain %q", got, want)
+		}
+	}
+}

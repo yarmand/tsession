@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/donestate"
+	"github.com/yarma/tsession/internal/remote"
 	"github.com/yarma/tsession/internal/sessions"
 	"github.com/yarma/tsession/internal/tmux"
 )
@@ -18,8 +21,8 @@ var execCommand = exec.Command
 func Resume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ExitOnError)
 	target := fs.String("target", "", "tmux client to switch (/dev/... path, or any value to pick interactively)")
-	summary := fs.String("summary", "", "session summary (tiebreaker for multi-pane remotes)")
-	origin := fs.String("origin", "", "remote origin name (for instant local pane lookup)")
+	_ = fs.String("summary", "", "session summary (retained for browse command compatibility)")
+	origin := fs.String("origin", "", "remote origin name")
 	_ = fs.Parse(args)
 
 	if fs.NArg() < 1 {
@@ -27,68 +30,64 @@ func Resume(args []string) error {
 	}
 	id := fs.Arg(0)
 
-	// Fast path: if origin is provided, find the local tmux pane connected to
-	// that remote by checking pane child processes. No SSH or session loading needed.
+	var match *sessions.Session
 	if *origin != "" {
-		if paneTarget := findLocalPaneForRemote(*origin, *summary, *target); paneTarget != "" {
-			if err := tmux.SwitchClientTarget(paneTarget, *target); err != nil {
-				return err
-			}
-			_ = donestate.Clear(id)
-			return nil
-		}
-	}
-
-	local, err := loadAll(14*24*time.Hour, true)
-	if err != nil {
-		return err
-	}
-	match := findSessionByID(local, id)
-	if match == nil || match.Origin != "" {
 		merged, err := loadAll(14*24*time.Hour, false)
 		if err != nil {
 			return err
 		}
-		if cached := findSessionByID(merged, id); cached != nil {
-			match = cached
+		match = findSessionByIDAndOrigin(merged, id, *origin)
+		if match == nil {
+			selectedRemote, err := remoteHost(*origin)
+			if err != nil {
+				return err
+			}
+			remoteMap, warnings := fetchRemoteSessions(
+				context.Background(),
+				[]config.Remote{selectedRemote},
+				14*24*time.Hour,
+				10*time.Second,
+				remote.FetchOptions{},
+			)
+			match = findSessionByIDAndOrigin(remoteMap[*origin], id, *origin)
+			if match == nil && len(warnings) > 0 {
+				return fmt.Errorf("remote session %q from %q not found: %s", id, *origin, strings.Join(warnings, "; "))
+			}
+		}
+		if match == nil {
+			return fmt.Errorf("remote session %q from %q not found", id, *origin)
+		}
+	} else {
+		local, err := loadAll(14*24*time.Hour, true)
+		if err != nil {
+			return err
+		}
+		match = findSessionByID(local, id)
+		if match == nil || match.Origin != "" {
+			merged, err := loadAll(14*24*time.Hour, false)
+			if err != nil {
+				return err
+			}
+			if cached := findSessionByID(merged, id); cached != nil {
+				match = cached
+			}
 		}
 	}
 
 	if match != nil && match.Origin != "" {
-		// Remote session: resolve local tmux pane by matching pane title to summary.
-		// The cache doesn't store this (panes are dynamic), so we resolve at resume time.
-		if match.TmuxTarget == "" && match.Summary != "" {
-			if panes, err := listPanesWithTitleFn(); err == nil && len(panes) > 0 {
-				for _, p := range panes {
-					if sessions.MatchTitle(p.Title, match.Summary) {
-						match.TmuxTarget = p.Target()
-						match.TmuxName = p.SessionName
-						break
-					}
-				}
-			}
-		}
-		// If we found a local tmux pane, switch to it (instant).
-		if match.TmuxTarget != "" || match.TmuxName != "" {
-			tmuxTarget := match.TmuxTarget
-			if tmuxTarget == "" {
-				tmuxTarget = match.TmuxName
-			}
-			if err := tmux.SwitchClientTarget(tmuxTarget, *target); err != nil {
-				return err
-			}
-			_ = donestate.Clear(id)
-			return nil
-		}
-		// No local pane found — open a new connection and resume directly.
 		remote, err := remoteHost(match.Origin)
 		if err != nil {
 			return err
 		}
-		args := remoteResumeArgs(*match, remote)
-		cmd := execCommand(args[0], args[1:]...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-		return cmd.Run()
+		bridge, err := ensureRemoteBridge(*match, remote)
+		if err != nil {
+			return err
+		}
+		if err := switchClientTargetFn(bridge, *target); err != nil {
+			return err
+		}
+		_ = donestate.Clear(id)
+		return nil
 	}
 
 	if match != nil && (match.TmuxTarget != "" || match.TmuxName != "") {
@@ -120,17 +119,18 @@ func Resume(args []string) error {
 	return cmd.Run()
 }
 
-func remoteResumeArgs(s sessions.Session, remote config.Remote) []string {
-	resumeCmd := "copilot --resume=" + s.ID
-	bin, args := remote.ResumeCommand()
-	result := append([]string{bin}, args...)
-	result = append(result, resumeCmd)
-	return result
-}
-
 func findSessionByID(all []sessions.Session, id string) *sessions.Session {
 	for i := range all {
 		if all[i].ID == id {
+			return &all[i]
+		}
+	}
+	return nil
+}
+
+func findSessionByIDAndOrigin(all []sessions.Session, id, origin string) *sessions.Session {
+	for i := range all {
+		if all[i].ID == id && all[i].Origin == origin {
 			return &all[i]
 		}
 	}
@@ -164,61 +164,4 @@ func remoteHost(origin string) (config.Remote, error) {
 		}
 	}
 	return config.Remote{}, fmt.Errorf("remote %q not configured", origin)
-}
-
-// findLocalPaneForRemote finds a local tmux pane that is connected to the
-// given remote by checking child processes of each pane against the remote's
-// SSH/docker command pattern. Uses summary as tiebreaker if multiple panes
-// match the same remote.
-func findLocalPaneForRemote(origin, summary, _ string) string {
-	cfg, err := loadConfig()
-	if err != nil {
-		return ""
-	}
-
-	// Find the remote config to build match patterns.
-	var remote *config.Remote
-	for i := range cfg.Remotes {
-		if cfg.Remotes[i].Name == origin {
-			remote = &cfg.Remotes[i]
-			break
-		}
-	}
-	if remote == nil {
-		return ""
-	}
-
-	infos := []struct{ Name, Type, Host, SSHCommand, Codespace, Container string }{{
-		Name: remote.Name, Type: remote.Type, Host: remote.Host,
-		SSHCommand: remote.SSHCommand, Codespace: remote.Codespace, Container: remote.Container,
-	}}
-	patterns := sessions.MatchPatterns(infos)
-	if len(patterns) == 0 {
-		return ""
-	}
-
-	panes, err := listPanesWithTitleFn()
-	if err != nil || len(panes) == 0 {
-		return ""
-	}
-
-	// Use ResolveRemotePanes machinery: create a dummy session and resolve.
-	dummy := map[string][]sessions.Session{
-		origin: {{ID: "lookup", Origin: origin, Summary: summary}},
-	}
-	result := sessions.ResolveRemotePanes(dummy, panes, patterns)
-	if sess := result[origin]; len(sess) > 0 && sess[0].TmuxTarget != "" {
-		return sess[0].TmuxTarget
-	}
-
-	// Fallback: if process-tree matching didn't work but we have a summary,
-	// try title matching directly.
-	if summary != "" {
-		for _, p := range panes {
-			if sessions.MatchTitle(p.Title, summary) {
-				return p.Target()
-			}
-		}
-	}
-	return ""
 }

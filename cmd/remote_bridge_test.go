@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/tmux"
 )
 
 func TestRemoteBridgeNameIsStableAndSanitized(t *testing.T) {
@@ -131,5 +133,37 @@ func TestRemoteBridgeCommandDevcontainerWithoutTmuxResumesDirectly(t *testing.T)
 	}
 	if args[len(args)-1] != "exec copilot --resume='abcdefgh-1234'" {
 		t.Fatalf("remote command = %q", args[len(args)-1])
+	}
+}
+
+func TestEnsureRemoteBridgeUsesStableAlternateNameOnCollision(t *testing.T) {
+	t.Setenv("HOME", "/Users/me")
+	oldEnsure := ensureBridgeFn
+	t.Cleanup(func() { ensureBridgeFn = oldEnsure })
+
+	var names []string
+	ensureBridgeFn = func(spec tmux.BridgeSpec) (string, error) {
+		names = append(names, spec.Name)
+		if len(names) == 1 {
+			return "", &tmux.BridgeCollisionError{Name: spec.Name}
+		}
+		return spec.Name, nil
+	}
+
+	session := sessions.Session{ID: "full-session-id", Origin: "mstudio"}
+	got, err := ensureRemoteBridge(session, config.Remote{Type: "ssh", Host: "mstudio"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 || names[0] == names[1] {
+		t.Fatalf("bridge names = %v, want stable alternate after collision", names)
+	}
+	if got != names[1] {
+		t.Fatalf("bridge = %q, want %q", got, names[1])
+	}
+
+	var collision *tmux.BridgeCollisionError
+	if errors.As(err, &collision) {
+		t.Fatalf("collision was not recovered: %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +23,15 @@ type Pane struct {
 	Title       string // terminal title (set by running app, e.g. copilot session summary)
 }
 
+var listTmuxOutput = func(args ...string) ([]byte, error) {
+	return exec.Command("tmux", args...).CombinedOutput()
+}
+
+func Available() bool {
+	_, err := exec.LookPath("tmux")
+	return err == nil
+}
+
 // Target returns the tmux target string for this pane, suitable for
 // `tmux switch-client -t` / `tmux attach-session -t`.
 func (p Pane) Target() string {
@@ -29,10 +39,12 @@ func (p Pane) Target() string {
 }
 
 func ListSessions() ([]Session, error) {
-	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}|#{session_path}")
-	out, err := cmd.Output()
+	out, err := listTmuxOutput("list-sessions", "-F", "#{session_name}|#{session_path}")
 	if err != nil {
-		return nil, nil
+		if noTmuxServer(out, err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return parseListSessions(string(out)), nil
 }
@@ -90,45 +102,7 @@ func ResolveTarget(target string) (string, error) {
 	if strings.HasPrefix(target, "/dev/") {
 		return target, nil
 	}
-	// Any other value (e.g. "pick", "?") triggers interactive selection.
-	return pickClient()
-}
-
-// pickClient shows tmux clients and lets the user choose one via fzf.
-func pickClient() (string, error) {
-	out, err := exec.Command("tmux", "list-clients", "-F", "#{client_tty} #{session_name}").Output()
-	if err != nil {
-		return "", fmt.Errorf("list-clients failed: %w", err)
-	}
-	lines := splitNonEmpty(string(out))
-	if len(lines) == 0 {
-		return "", fmt.Errorf("no tmux clients found")
-	}
-	if len(lines) == 1 {
-		// Only one client — use it directly.
-		return strings.Fields(lines[0])[0], nil
-	}
-
-	// Use fzf if available, otherwise just pick the first non-current client.
-	fzfPath, fzfErr := exec.LookPath("fzf")
-	if fzfErr != nil {
-		// No fzf — return first client.
-		return strings.Fields(lines[0])[0], nil
-	}
-
-	input := strings.Join(lines, "\n")
-	cmd := exec.Command(fzfPath, "--prompt=target client> ", "--no-info", "--reverse")
-	cmd.Stdin = strings.NewReader(input)
-	cmd.Stderr = os.Stderr
-	selected, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("fzf cancelled")
-	}
-	fields := strings.Fields(strings.TrimSpace(string(selected)))
-	if len(fields) == 0 {
-		return "", fmt.Errorf("no client selected")
-	}
-	return fields[0], nil
+	return pickTargetClient()
 }
 
 func splitNonEmpty(s string) []string {
@@ -190,12 +164,26 @@ func RenameSession(oldName, newName string) error {
 // session that contains it (by walking the process tree up from the
 // Copilot PID until an ancestor matches a pane PID).
 func ListPanes() ([]Pane, error) {
-	cmd := exec.Command("tmux", "list-panes", "-a", "-F", "#{session_name}|#{window_index}|#{pane_index}|#{pane_pid}")
-	out, err := cmd.Output()
+	out, err := listTmuxOutput("list-panes", "-a", "-F", "#{session_name}|#{window_index}|#{pane_index}|#{pane_pid}")
 	if err != nil {
-		return nil, nil
+		if noTmuxServer(out, err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return parseListPanes(string(out)), nil
+}
+
+func noTmuxServer(out []byte, err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	message := strings.ToLower(string(out) + "\n" + string(exitErr.Stderr))
+	return strings.Contains(message, "no server running") ||
+		strings.Contains(message, "failed to connect to server") ||
+		(strings.Contains(message, "error connecting to") &&
+			strings.Contains(message, "no such file or directory"))
 }
 
 // ListPanesWithTitle returns panes including the pane title.

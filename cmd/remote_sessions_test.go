@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/remote"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/tmux"
 )
 
 func testSession(id string) sessions.Session {
@@ -111,7 +111,10 @@ func TestLoadAllWithRemotes_FiltersCachedRemoteSessionsFromLocal(t *testing.T) {
 	oldFetch := fetchRemoteSessions
 	defer func() { fetchRemoteSessions = oldFetch }()
 	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts remote.FetchOptions) (map[string][]sessions.Session, []string) {
-		return map[string][]sessions.Session{"devbox": {testSession("remote")}}, nil
+		remoteSession := testSession("remote")
+		remoteSession.Origin = "devbox"
+		remoteSession.Summary = "summary\tremote"
+		return map[string][]sessions.Session{"devbox": {remoteSession}}, nil
 	}
 
 	local, _, _, _, err := loadAllWithRemotes(24*time.Hour, false, false)
@@ -143,7 +146,10 @@ func TestInitialListBytes_IncludesSectionDividers(t *testing.T) {
 	oldFetch := fetchRemoteSessions
 	defer func() { fetchRemoteSessions = oldFetch }()
 	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts remote.FetchOptions) (map[string][]sessions.Session, []string) {
-		return map[string][]sessions.Session{"devbox": {testSession("remote")}}, nil
+		remoteSession := testSession("remote")
+		remoteSession.Origin = "devbox"
+		remoteSession.Summary = "summary\tremote"
+		return map[string][]sessions.Session{"devbox": {remoteSession}}, nil
 	}
 
 	got, err := initialListBytes(24*time.Hour, false, false, 0, false)
@@ -153,53 +159,36 @@ func TestInitialListBytes_IncludesSectionDividers(t *testing.T) {
 	if !strings.Contains(got, "── Local ") || !strings.Contains(got, "── devbox ") {
 		t.Fatalf("missing section dividers in output:\n%s", got)
 	}
-	if !strings.Contains(got, "\tlocal\n") {
-		t.Fatalf("missing local session row in output:\n%s", got)
+	rows := make(map[string][]string)
+	for _, line := range strings.Split(got, "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) == 10 {
+			rows[fields[1]] = fields
+		}
 	}
-	if !strings.Contains(got, "\tremote\n") {
-		t.Fatalf("missing remote session row in output:\n%s", got)
+	if len(rows["local"]) != 10 {
+		t.Fatalf("missing ten-field local session row in output:\n%s", got)
 	}
-}
-
-func TestRemoteResumeArgs(t *testing.T) {
-	// SSH — always just runs copilot resume on remote (no tmux wrapping)
-	sshRemote := config.Remote{Name: "devbox", Host: "devbox", Type: "ssh"}
-	got := remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, sshRemote)
-	want := []string{"ssh", "-t", "devbox", "copilot --resume=abcdefgh-1234"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ssh resume = %v, want %v", got, want)
-	}
-
-	// Codespace
-	csRemote := config.Remote{Name: "cs", Type: "codespace", Codespace: "my-cs"}
-	got = remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, csRemote)
-	want = []string{"gh", "codespace", "ssh", "--codespace", "my-cs", "-t", "--", "copilot --resume=abcdefgh-1234"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("codespace resume = %v, want %v", got, want)
-	}
-
-	// Devcontainer
-	dcRemote := config.Remote{Name: "dc", Type: "devcontainer", Container: "myapp", User: "vscode"}
-	got = remoteResumeArgs(sessions.Session{ID: "abcdefgh-1234"}, dcRemote)
-	want = []string{"docker", "exec", "-it", "-u", "vscode", "myapp", "copilot --resume=abcdefgh-1234"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("devcontainer resume = %v, want %v", got, want)
+	remoteFields := rows["remote"]
+	if len(remoteFields) != 10 || remoteFields[7] != "summary remote" || remoteFields[9] != "devbox" {
+		t.Fatalf("remote fzf fields = %v, output:\n%s", remoteFields, got)
 	}
 }
 
-func TestResume_RemoteSessionUsesSSHFromCache(t *testing.T) {
+func TestResumeRemoteSessionEnsuresBridgeAndSwitchesSelectedClient(t *testing.T) {
 	writeConfigFile(t, `remotes:
-  - name: devbox
-    host: devbox.example.com
+  - name: mstudio
+    host: mstudio
 `)
-	// Remote session WITHOUT TmuxTarget — falls through to SSH resume.
 	if err := cache.Write(cache.File{
 		UpdatedAt: time.Now().UTC(),
 		Interval:  10 * time.Second,
 		Sessions: []sessions.Session{{
-			ID:        "remote-id",
-			Origin:    "devbox",
-			UpdatedAt: time.Now().UTC(),
+			ID:                  "remote-id",
+			Origin:              "mstudio",
+			RemoteTmuxAvailable: true,
+			RemoteTmuxTarget:    "famstack:2.0",
+			UpdatedAt:           time.Now().UTC(),
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -211,20 +200,84 @@ func TestResume_RemoteSessionUsesSSHFromCache(t *testing.T) {
 		return nil, nil
 	}
 
-	oldExec := execCommand
-	defer func() { execCommand = oldExec }()
-	var gotCmd []string
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		gotCmd = append([]string{name}, args...)
-		return exec.Command("sh", "-c", "true")
+	oldEnsure := ensureBridgeFn
+	oldSwitch := switchClientTargetFn
+	t.Cleanup(func() {
+		ensureBridgeFn = oldEnsure
+		switchClientTargetFn = oldSwitch
+	})
+
+	var gotSpec tmux.BridgeSpec
+	ensureBridgeFn = func(spec tmux.BridgeSpec) (string, error) {
+		gotSpec = spec
+		return spec.Name, nil
+	}
+	var gotBridge, gotClient string
+	switchClientTargetFn = func(bridge, client string) error {
+		gotBridge, gotClient = bridge, client
+		return nil
 	}
 
-	if err := Resume([]string{"remote-id"}); err != nil {
+	if err := Resume([]string{"--target=/dev/ttys001", "--origin=mstudio", "remote-id"}); err != nil {
 		t.Fatal(err)
 	}
-	wantCmd := []string{"ssh", "-t", "devbox.example.com", "copilot --resume=remote-id"}
-	if !reflect.DeepEqual(gotCmd, wantCmd) {
-		t.Fatalf("cmd = %v, want %v", gotCmd, wantCmd)
+	if gotSpec.Origin != "mstudio" || gotSpec.SessionID != "remote-id" {
+		t.Fatalf("bridge spec = %+v", gotSpec)
+	}
+	if !strings.Contains(gotSpec.Command, "'ssh' '-t' 'mstudio'") ||
+		!strings.Contains(gotSpec.Command, "famstack:2.0") {
+		t.Fatalf("bridge command = %q", gotSpec.Command)
+	}
+	if gotBridge != gotSpec.Name || gotClient != "/dev/ttys001" {
+		t.Fatalf("switch = (%q,%q)", gotBridge, gotClient)
+	}
+}
+
+func TestResumeRemoteSessionFetchesLiveMetadataWithoutCache(t *testing.T) {
+	writeConfigFile(t, `remotes:
+  - name: mstudio
+    host: mstudio
+`)
+
+	oldLoadAllLive := loadAllLiveFn
+	oldFetch := fetchRemoteSessions
+	oldEnsure := ensureBridgeFn
+	oldSwitch := switchClientTargetFn
+	t.Cleanup(func() {
+		loadAllLiveFn = oldLoadAllLive
+		fetchRemoteSessions = oldFetch
+		ensureBridgeFn = oldEnsure
+		switchClientTargetFn = oldSwitch
+	})
+	loadAllLiveFn = func(maxAge time.Duration) ([]sessions.Session, error) {
+		return nil, nil
+	}
+	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts remote.FetchOptions) (map[string][]sessions.Session, []string) {
+		if len(remotes) != 1 || remotes[0].Name != "mstudio" {
+			t.Fatalf("fetched remotes = %+v, want only mstudio", remotes)
+		}
+		return map[string][]sessions.Session{
+			"mstudio": {{
+				ID:                  "remote-id",
+				Origin:              "mstudio",
+				RemoteTmuxAvailable: true,
+				RemoteTmuxTarget:    "famstack:2.0",
+				UpdatedAt:           time.Now().UTC(),
+			}},
+		}, nil
+	}
+	var gotSpec tmux.BridgeSpec
+	ensureBridgeFn = func(spec tmux.BridgeSpec) (string, error) {
+		gotSpec = spec
+		return spec.Name, nil
+	}
+	switchClientTargetFn = func(bridge, client string) error { return nil }
+
+	if err := Resume([]string{"--origin=mstudio", "remote-id"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotSpec.Origin != "mstudio" || gotSpec.SessionID != "remote-id" {
+		t.Fatalf("bridge spec = %+v", gotSpec)
 	}
 }
 

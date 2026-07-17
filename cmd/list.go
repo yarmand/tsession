@@ -19,10 +19,10 @@ import (
 )
 
 var (
-	loadConfig              = config.Load
-	fetchRemoteSessions     = remote.FetchAll
-	loadAllLiveFn           = loadAllLive
-	listPanesWithTitleFn    = tmux.ListPanesWithTitle
+	loadConfig           = config.Load
+	fetchRemoteSessions  = remote.FetchAll
+	loadAllLiveFn        = loadAllLive
+	listPanesWithTitleFn = tmux.ListPanesWithTitle
 )
 
 func List(args []string) error {
@@ -115,41 +115,52 @@ func renderSessionList(w io.Writer, list []sessions.Session, now time.Time, colo
 	for _, s := range list {
 		if useShort {
 			line := render.FormatLineShortWithContext(s, now, color, shortCtx, lshort)
-			parts := strings.SplitN(line, "\t", 2)
-			display, id := parts[0], ""
-			if len(parts) == 2 {
-				id = parts[1]
-			}
+			display := fzfDisplay(line)
 
 			if fzfMode {
-				ts := s.LastEventAt
-				if ts.IsZero() {
-					ts = s.UpdatedAt
-				}
-				age := render.FormatAge(now.Sub(ts))
-				summary := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " "), "\t", " ")
-				if summary == "" {
-					summary = "(no summary)"
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					display,
-					id,
-					s.Repository,
-					s.CWD,
-					render.OriginShortName(s.Repository),
-					s.State.String(),
-					age,
-					summary,
-					shortCtx.LegendField(),
-					s.Origin,
-				)
+				writeFzfSession(w, s, display, now, shortCtx.LegendField())
 			} else {
 				fmt.Fprintln(w, display)
 			}
 		} else {
-			fmt.Fprintln(w, render.FormatLine(s, now, color))
+			line := render.FormatLine(s, now, color)
+			if fzfMode {
+				writeFzfSession(w, s, fzfDisplay(line), now, "")
+			} else {
+				fmt.Fprintln(w, line)
+			}
 		}
 	}
+}
+
+func fzfDisplay(line string) string {
+	if index := strings.LastIndexByte(line, '\t'); index >= 0 {
+		line = line[:index]
+	}
+	return strings.ReplaceAll(line, "\t", " ")
+}
+
+func writeFzfSession(w io.Writer, s sessions.Session, display string, now time.Time, legend string) {
+	ts := s.LastEventAt
+	if ts.IsZero() {
+		ts = s.UpdatedAt
+	}
+	summary := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(s.Summary)
+	if summary == "" {
+		summary = "(no summary)"
+	}
+	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		display,
+		s.ID,
+		s.Repository,
+		s.CWD,
+		render.OriginShortName(s.Repository),
+		s.State.String(),
+		render.FormatAge(now.Sub(ts)),
+		summary,
+		legend,
+		s.Origin,
+	)
 }
 
 func printSectionDivider(w io.Writer, name string, color, fzfMode bool, lshort int) {

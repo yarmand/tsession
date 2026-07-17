@@ -13,7 +13,7 @@ import (
 )
 
 // defaultRepo is the GitHub repository used to resolve release assets.
-const defaultRepo = "yarma/tsession"
+const defaultRepo = "yarmand/tsession"
 
 // remoteBinDir is where installed binaries live on the remote host.
 const remoteBinDir = ".tsession/remote-bin"
@@ -26,6 +26,11 @@ type UpdateOptions struct {
 
 type detectRuntimeFunc func(context.Context, config.Remote) (string, error)
 type resolveReleaseFunc func(context.Context, string, string, string, *http.Client) (ResolvedAsset, error)
+
+var remoteBinaryExistsFn = func(ctx context.Context, r config.Remote, path string) bool {
+	_, err := runRemoteCmd(ctx, r, "test -x "+shellQuote(path))
+	return err == nil
+}
 
 // EnsureRemoteBinary ensures a runtime-appropriate tsession binary is
 // installed on the remote host, refreshing runtime/version resolution at
@@ -49,7 +54,10 @@ func ensureRemoteBinaryWithDeps(
 	resolveRelease resolveReleaseFunc,
 ) (string, error) {
 	if !NeedsRefresh(state, time.Now().UTC(), opts.CheckInterval, opts.Force) && state.Version != "" {
-		return remoteBinaryPath(state.Version), nil
+		path := remoteBinaryPath(state.Version)
+		if remoteBinaryExistsFn(ctx, r, path) {
+			return path, nil
+		}
 	}
 
 	runtime, err := detectRuntime(ctx, r)

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yarma/tsession/internal/sessions"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -24,6 +26,29 @@ func TestBuildActiveSnapshot_ReturnsOnlyActiveStates(t *testing.T) {
 		if s.State == "exited" || s.State == "unknown" || s.State == "idle" {
 			t.Fatalf("unexpected inactive state in payload: %s", s.State)
 		}
+	}
+}
+
+func TestBuildActiveSnapshotReportsTmuxCapabilityAndTarget(t *testing.T) {
+	oldLoad := loadLocalSessionsFn
+	t.Cleanup(func() { loadLocalSessionsFn = oldLoad })
+	loadLocalSessionsFn = func(time.Duration) ([]sessions.Session, bool, error) {
+		return []sessions.Session{{
+			ID:         "remote-id",
+			State:      sessions.StateActiveIdle,
+			TmuxTarget: "famstack:2.0",
+		}}, true, nil
+	}
+
+	payload, err := BuildActiveSnapshot(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !payload.TmuxAvailable {
+		t.Fatal("snapshot did not report tmux availability")
+	}
+	if len(payload.Sessions) != 1 || payload.Sessions[0].TmuxTarget != "famstack:2.0" {
+		t.Fatalf("payload sessions = %+v", payload.Sessions)
 	}
 }
 

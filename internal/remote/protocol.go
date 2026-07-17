@@ -35,12 +35,14 @@ type SessionPayload struct {
 	UpdatedAt   string `json:"updated_at,omitempty"`
 	LastEventAt string `json:"last_event_at,omitempty"`
 	Source      string `json:"source,omitempty"`
+	TmuxTarget  string `json:"tmuxTarget,omitempty"`
 }
 
 // SnapshotPayload is the full-snapshot response payload for the "snapshot"
 // RPC method.
 type SnapshotPayload struct {
-	Sessions []SessionPayload `json:"sessions"`
+	TmuxAvailable bool             `json:"tmuxAvailable"`
+	Sessions      []SessionPayload `json:"sessions"`
 }
 
 // ToSessions converts a SnapshotPayload into local sessions.Session values,
@@ -55,15 +57,17 @@ func (p SnapshotPayload) ToSessions(origin string, maxAge time.Duration) []sessi
 	out := make([]sessions.Session, 0, len(p.Sessions))
 	for _, sp := range p.Sessions {
 		s := sessions.Session{
-			ID:          sp.ID,
-			CWD:         sp.CWD,
-			Repository:  sp.Repository,
-			Summary:     sp.Summary,
-			State:       parseState(sp.State),
-			UpdatedAt:   parseTime(sp.UpdatedAt),
-			LastEventAt: parseTime(sp.LastEventAt),
-			Source:      sp.Source,
-			Origin:      origin,
+			ID:                  sp.ID,
+			CWD:                 sp.CWD,
+			Repository:          sp.Repository,
+			Summary:             sp.Summary,
+			State:               parseState(sp.State),
+			UpdatedAt:           parseTime(sp.UpdatedAt),
+			LastEventAt:         parseTime(sp.LastEventAt),
+			Source:              sp.Source,
+			Origin:              origin,
+			RemoteTmuxTarget:    sp.TmuxTarget,
+			RemoteTmuxAvailable: p.TmuxAvailable,
 		}
 		if !cutoff.IsZero() && !s.UpdatedAt.IsZero() && s.UpdatedAt.Before(cutoff) {
 			continue
@@ -100,6 +104,7 @@ func sessionToPayload(s sessions.Session) SessionPayload {
 		Summary:    s.Summary,
 		State:      s.State.String(),
 		Source:     s.Source,
+		TmuxTarget: s.TmuxTarget,
 	}
 	if !s.UpdatedAt.IsZero() {
 		sp.UpdatedAt = s.UpdatedAt.UTC().Format(time.RFC3339Nano)

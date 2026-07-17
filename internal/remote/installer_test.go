@@ -10,6 +10,10 @@ import (
 )
 
 func TestEnsureRemoteBinary_UsesCachedWhenTTLValid(t *testing.T) {
+	oldExists := remoteBinaryExistsFn
+	t.Cleanup(func() { remoteBinaryExistsFn = oldExists })
+	remoteBinaryExistsFn = func(context.Context, config.Remote, string) bool { return true }
+
 	now := time.Now().UTC()
 	state := UpdateState{
 		LastCheckedAt: now.Add(-2 * time.Hour),
@@ -41,6 +45,50 @@ func TestEnsureRemoteBinary_UsesCachedWhenTTLValid(t *testing.T) {
 	}
 	if detectCalled || resolveCalled {
 		t.Fatalf("expected no detect/resolve calls when ttl valid, got detect=%v resolve=%v", detectCalled, resolveCalled)
+	}
+}
+
+func TestEnsureRemoteBinary_RefreshesWhenCachedBinaryIsMissing(t *testing.T) {
+	oldExists := remoteBinaryExistsFn
+	t.Cleanup(func() { remoteBinaryExistsFn = oldExists })
+	remoteBinaryExistsFn = func(context.Context, config.Remote, string) bool { return false }
+
+	state := UpdateState{
+		LastCheckedAt: time.Now().UTC().Add(-2 * time.Hour),
+		Runtime:       "linux-amd64",
+		Version:       "v1.2.3",
+		AssetName:     "tsession_linux-amd64.tar.gz",
+	}
+
+	detectCalled := false
+	resolveCalled := false
+	detectRuntimeFn := func(context.Context, config.Remote) (string, error) {
+		detectCalled = true
+		return "linux-amd64", nil
+	}
+	resolveReleaseFn := func(context.Context, string, string, string, *http.Client) (ResolvedAsset, error) {
+		resolveCalled = true
+		return ResolvedAsset{
+			Version:     "v1.2.3",
+			AssetName:   "tsession_v1.2.3_linux_amd64.tar.gz",
+			DownloadURL: "https://example/asset",
+		}, nil
+	}
+
+	_, err := ensureRemoteBinaryWithDeps(
+		context.Background(),
+		config.Remote{Name: "devbox", Type: "devcontainer", Container: "tsession-test-nonexistent-container"},
+		"v1.2.3",
+		UpdateOptions{CheckInterval: 24 * time.Hour},
+		state,
+		detectRuntimeFn,
+		resolveReleaseFn,
+	)
+	if err == nil {
+		t.Fatal("expected install error against nonexistent container")
+	}
+	if !detectCalled || !resolveCalled {
+		t.Fatalf("missing cached binary did not refresh: detect=%v resolve=%v", detectCalled, resolveCalled)
 	}
 }
 

@@ -93,3 +93,28 @@ func TestGatherResultToSessions(t *testing.T) {
 		t.Fatalf("want timestamps parsed, got %+v", got[0])
 	}
 }
+
+func TestSnapshotPayloadToSessionsCarriesRemoteTmuxMetadata(t *testing.T) {
+	payload := SnapshotPayload{
+		TmuxAvailable: true,
+		Sessions: []SessionPayload{{
+			ID:         "remote-id",
+			State:      "active",
+			TmuxTarget: "famstack:2.0",
+		}},
+	}
+
+	got := payload.ToSessions("mstudio", 0)
+	if len(got) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(got))
+	}
+	if got[0].RemoteTmuxTarget != "famstack:2.0" {
+		t.Fatalf("remote target = %q", got[0].RemoteTmuxTarget)
+	}
+	if !got[0].RemoteTmuxAvailable {
+		t.Fatal("remote tmux availability was not propagated")
+	}
+	if got[0].TmuxTarget != "" {
+		t.Fatalf("local tmux target was polluted: %q", got[0].TmuxTarget)
+	}
+}

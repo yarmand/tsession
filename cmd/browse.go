@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/yarma/tsession/internal/render"
-	"github.com/yarma/tsession/internal/tmux"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/tmux"
 )
 
 func Browse(args []string) error {
@@ -47,10 +47,15 @@ func Browse(args []string) error {
 		if err != nil {
 			return err
 		}
-		if id == "" {
-			return nil
+		if shouldResumeAfterFzf(tmux.InTmux(), id) {
+			resumeArgs := make([]string, 0, 2)
+			if resolvedTarget != "" {
+				resumeArgs = append(resumeArgs, "--target="+resolvedTarget)
+			}
+			resumeArgs = append(resumeArgs, id)
+			return Resume(resumeArgs)
 		}
-		return Resume([]string{id})
+		return nil
 	}
 
 	for {
@@ -63,6 +68,18 @@ func Browse(args []string) error {
 			return nil
 		}
 	}
+}
+
+func shouldResumeAfterFzf(inTmux bool, id string) bool {
+	return id != "" && !inTmux
+}
+
+var runTmuxCommand = func(args []string, interactive bool) error {
+	cmd := exec.Command("tmux", args...)
+	if interactive {
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	}
+	return cmd.Run()
 }
 
 // launchInTmux starts a tmux session named "tsession" (in $HOME) and runs
@@ -84,11 +101,17 @@ func launchInTmux(browseArgs []string) error {
 		home = "/"
 	}
 
-	// Create or attach to a tmux session named "tsession", running our command.
-	// Use new-session with -A to attach if it already exists.
-	cmd := exec.Command("tmux", "new-session", "-A", "-s", "session-nav", "-c", home, tmuxCmd)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
+	if runTmuxCommand([]string{"has-session", "-t", "session-nav"}, false) == nil {
+		if err := runTmuxCommand([]string{"respawn-pane", "-k", "-t", "session-nav", "-c", home, tmuxCmd}, false); err != nil {
+			return fmt.Errorf("restart session navigator: %w", err)
+		}
+	} else {
+		if err := runTmuxCommand([]string{"new-session", "-d", "-s", "session-nav", "-c", home, tmuxCmd}, false); err != nil {
+			return fmt.Errorf("create session navigator: %w", err)
+		}
+	}
+
+	return runTmuxCommand([]string{"attach-session", "-t", "session-nav"}, true)
 }
 
 func runFzf(maxAge time.Duration, query string, popup, active, short bool, lshort int, localOnly bool, target string, notify bool) (string, error) {
@@ -284,16 +307,21 @@ func asExit(err error, target **exec.ExitError) bool {
 // accepts the selection and exits (attach cannot work without a tmux client).
 func enterBinding(self, target string) string {
 	if tmux.InTmux() {
-		resumeCmd := shellQuote(self) + " resume"
-		if target != "" {
-			resumeCmd += " --target=" + shellQuote(target)
-		}
-		// {10} is session origin (remote name), {8} is summary.
-		// fzf shell-quotes field replacements automatically.
-		resumeCmd += " --origin {10} --summary {8} {2}"
-		return "--bind=enter:execute-silent(" + resumeCmd + ")+accept"
+		return "--bind=enter:execute-silent(" + resumeBindingCommand(self, target) + ")+accept"
 	}
 	return "--bind=enter:accept"
+}
+
+func resumeBindingCommand(self, target string) string {
+	resumeCmd := shellQuote(self) + " resume"
+	if target != "" {
+		resumeCmd += " --target=" + shellQuote(target)
+	}
+	// {10} is session origin (remote name), {8} is summary.
+	// fzf shell-quotes field replacements automatically.
+	resumeCmd += " --origin {10} --summary {8} {2}"
+	script := `err=$("$@" 2>&1) || tmux display-message "tsession: $err"`
+	return "sh -c " + shellQuote(script) + " _ " + resumeCmd
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quotes,

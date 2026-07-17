@@ -16,13 +16,17 @@ The primary workflow: use your terminal's native split to create two panes side 
 
 ![browse](browse.png)
 
-Before yo start tsession, use your native terminal split capabilities. the the split you want to display session, start a tmux session. This session is only here the tsession to easily discover the TTY.
-In the split youwant the navigation, start tsession with:
+Before starting tsession, create a native terminal split. Start or attach a tmux
+session in the split that will display sessions, then run this in the navigation
+split:
+
 ```bash
 tsession browse --watch --active --short --target pick
 ```
 
-On first launch, tsession asks you to pick which tmux client to target (the right pane). Then it shows a live-updating fzf list of active sessions. Press `enter` to switch the target pane to that session.
+On first launch, tsession asks you to pick which tmux client to target. If no
+non-navigation client is attached yet, it waits until one appears and then opens
+the picker for confirmation. It always excludes the `session-nav` client.
 
 The `--watch` flag keeps the picker open and refreshes every 5 seconds — it acts as a persistent session dashboard. Press `esc` to quit.
 
@@ -89,13 +93,6 @@ is running. macOS only — a no-op on other platforms.
 ---
 See [AGENTS.md](AGENTS.md) for technical internals, full flag reference, and cache architecture.
 
-
-# Coming soon
-
-- remote sessions support
-  - ssh
-  - github codespaces
-  - devcontainers
 
 | Glyph | State    | Meaning                                                                |
 |-------|----------|------------------------------------------------------------------------|
@@ -211,9 +208,11 @@ remotes:
 
 ### How it works
 
-`tsession` runs a lightweight gather script over SSH that collects session data
-from the remote's `~/.copilot/` directory and tmux state. Data is returned as
-JSON in a single SSH round-trip. Each remote appears as its own section:
+`tsession` installs the matching release binary under
+`~/.tsession/remote-bin/<version>/tsession` and requests a one-shot JSON
+snapshot through the configured transport. Remote tmux is optional; when
+available, the snapshot includes exact pane targets. Each remote appears as its
+own section:
 
 ```
 ── Local ──────────────────────────────────────────────────────────
@@ -224,21 +223,20 @@ JSON in a single SSH round-trip. Each remote appears as its own section:
   · idle     3h  infra       Terraform refactor
 ```
 
-### Resume behavior
+### Remote display behavior
 
-Remote sessions are always wrapped in tmux on the remote for persistence — if
-you disconnect, the agent keeps running and you can reattach later.
+Selecting a remote session creates or reuses a local tmux bridge named
+`tsession-r-<remote>-<id-hash>`. Only the selected `--target` client switches to
+that bridge; the navigation client remains in `session-nav`.
 
-**When the session already has a tmux target** (detected by gather):
-- Attaches directly: `ssh -t <host> tmux attach -t <target>`
+- If the remote session already has a live tmux target, the bridge attaches to it.
+- If remote tmux exists without a usable target, tsession creates or reuses a
+  deterministic remote tmux session running `copilot --resume`.
+- If remote tmux is unavailable, the bridge runs `copilot --resume` directly.
 
-**When no tmux target exists** (first connection or tmux wasn't detected):
-
-| Type | Command |
-|------|---------|
-| `ssh` | `ssh -t <host> tmux new-session -As tsession-<id> 'copilot --resume=<id>'` |
-| `codespace` | Tries tmux, falls back to direct resume if tmux unavailable |
-| `devcontainer` | Tries tmux, falls back to direct resume if tmux unavailable |
+The local bridge uses `remain-on-exit`, so a disconnected transport leaves its
+last output visible. Select the remote session again to reconnect the same
+bridge.
 
 ### Flags
 

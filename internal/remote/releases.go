@@ -91,14 +91,19 @@ func fetchRelease(ctx context.Context, httpClient *http.Client, url string) (rel
 }
 
 func findRuntimeAsset(rel release, runtime string) (ResolvedAsset, bool) {
-	suffix := "_" + runtime
+	suffixes := []string{
+		"_" + strings.ReplaceAll(runtime, "-", "_") + ".tar.gz",
+		"_" + runtime + ".tar.gz",
+	}
 	for _, a := range rel.Assets {
-		if strings.Contains(a.Name, suffix) {
-			return ResolvedAsset{
-				Version:     rel.TagName,
-				AssetName:   a.Name,
-				DownloadURL: a.DownloadURL,
-			}, true
+		for _, suffix := range suffixes {
+			if strings.HasSuffix(a.Name, suffix) {
+				return ResolvedAsset{
+					Version:     rel.TagName,
+					AssetName:   a.Name,
+					DownloadURL: a.DownloadURL,
+				}, true
+			}
 		}
 	}
 	return ResolvedAsset{}, false

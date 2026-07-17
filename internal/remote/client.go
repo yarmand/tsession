@@ -13,14 +13,9 @@ import (
 	"github.com/yarma/tsession/internal/sessions"
 )
 
-// tsessiondSession is the fixed tmux session name used for the remote daemon.
-const tsessiondSession = "tsessiond"
+const defaultRemoteCheckInterval = 24 * time.Hour
 
-// FetchOptions carries per-fetch tuning knobs for the daemon-backed remote
-// fetch path (binary update cadence, forced re-installs, etc). ClientTag,
-// CheckInterval, and ForceUpdate are consumed by the remote binary update
-// manager (a separate work stream); EnsureDaemonAndSnapshot accepts them
-// today so that integration is a non-breaking follow-up.
+// FetchOptions carries per-fetch remote binary update policy.
 type FetchOptions struct {
 	ClientTag     string
 	CheckInterval time.Duration
@@ -31,10 +26,10 @@ type FetchOptions struct {
 // configured transport (ssh, codespace, or devcontainer) and returns the
 // command's combined stdout. It is a package-level var so tests can stub it.
 var runRemoteCmd = func(ctx context.Context, r config.Remote, cmd string) ([]byte, error) {
-	bin, args := r.GatherCommand()
-	args = append(args, "bash", "-lc", cmd)
+	bin, args, stdin := remoteShellInvocation(r, cmd)
 
 	c := exec.CommandContext(ctx, bin, args...)
+	c.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	c.Stdout = &stdout
 	c.Stderr = &stderr
@@ -52,22 +47,22 @@ var runRemoteCmd = func(ctx context.Context, r config.Remote, cmd string) ([]byt
 	return stdout.Bytes(), nil
 }
 
-// ensureRemoteDaemon makes sure a `tsessiond` tmux session running
-// `tsession remote serve` exists on the remote, starting one if needed.
-func ensureRemoteDaemon(ctx context.Context, r config.Remote) error {
-	if _, err := runRemoteCmd(ctx, r, fmt.Sprintf("tmux has-session -t %s", tsessiondSession)); err == nil {
-		return nil
-	}
-	if _, err := runRemoteCmd(ctx, r, fmt.Sprintf("tmux new-session -Ad -s %s 'tsession remote serve'", tsessiondSession)); err != nil {
-		return fmt.Errorf("start remote daemon: %w", err)
-	}
-	return nil
+func remoteShellInvocation(r config.Remote, cmd string) (string, []string, string) {
+	bin, args := r.GatherCommand()
+	args = append(args, "bash", "-l", "-s")
+	return bin, args, "set -e\n" + cmd + "\n"
 }
+
+var ensureRemoteBinaryFn = EnsureRemoteBinary
 
 // RequestSnapshot asks the remote for a fresh active-only session snapshot
 // via a one-shot `tsession remote rpc snapshot` invocation.
 func RequestSnapshot(ctx context.Context, r config.Remote) (*SnapshotPayload, error) {
-	out, err := runRemoteCmd(ctx, r, "tsession remote rpc snapshot")
+	return requestSnapshot(ctx, r, "tsession")
+}
+
+func requestSnapshot(ctx context.Context, r config.Remote, binaryPath string) (*SnapshotPayload, error) {
+	out, err := runRemoteCmd(ctx, r, shellQuote(binaryPath)+" remote rpc snapshot")
 	if err != nil {
 		return nil, fmt.Errorf("request snapshot: %w", err)
 	}
@@ -81,13 +76,21 @@ func RequestSnapshot(ctx context.Context, r config.Remote) (*SnapshotPayload, er
 	return &resp.Payload, nil
 }
 
-// EnsureDaemonAndSnapshot ensures the remote daemon is running and returns a
-// merged, maxAge-filtered snapshot of that remote's active sessions.
+// EnsureDaemonAndSnapshot ensures the remote binary is installed and returns a
+// merged, maxAge-filtered one-shot snapshot of that remote's active sessions.
 func EnsureDaemonAndSnapshot(ctx context.Context, r config.Remote, opts FetchOptions, maxAge time.Duration) ([]sessions.Session, error) {
-	if err := ensureRemoteDaemon(ctx, r); err != nil {
-		return nil, err
+	checkInterval := opts.CheckInterval
+	if checkInterval <= 0 {
+		checkInterval = defaultRemoteCheckInterval
 	}
-	payload, err := RequestSnapshot(ctx, r)
+	binaryPath, err := ensureRemoteBinaryFn(ctx, r, opts.ClientTag, UpdateOptions{
+		Force:         opts.ForceUpdate,
+		CheckInterval: checkInterval,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ensure remote binary: %w", err)
+	}
+	payload, err := requestSnapshot(ctx, r, binaryPath)
 	if err != nil {
 		return nil, err
 	}

@@ -41,6 +41,22 @@ func TestListSessionsPropagatesUnexpectedCommandError(t *testing.T) {
 	}
 }
 
+func TestListSessionsTreatsMissingServerOutputAsUnavailable(t *testing.T) {
+	oldOutput := listTmuxOutput
+	t.Cleanup(func() { listTmuxOutput = oldOutput })
+	listTmuxOutput = func(...string) ([]byte, error) {
+		return []byte("no server running on /tmp/tmux-501/default"), &exec.ExitError{}
+	}
+
+	got, err := ListSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("sessions = %+v, want none", got)
+	}
+}
+
 func TestListPanesPropagatesUnexpectedCommandError(t *testing.T) {
 	oldOutput := listTmuxOutput
 	t.Cleanup(func() { listTmuxOutput = oldOutput })
@@ -55,10 +71,10 @@ func TestListPanesPropagatesUnexpectedCommandError(t *testing.T) {
 
 func TestNoTmuxServerRecognizesMissingServer(t *testing.T) {
 	err := &exec.ExitError{Stderr: []byte("no server running on /tmp/tmux-501/default")}
-	if !noTmuxServer(err) {
+	if !noTmuxServer(nil, err) {
 		t.Fatal("missing tmux server was not recognized")
 	}
-	if noTmuxServer(errors.New("permission denied")) {
+	if noTmuxServer(nil, errors.New("permission denied")) {
 		t.Fatal("unexpected command error was treated as a missing server")
 	}
 }

@@ -24,7 +24,7 @@ type Pane struct {
 }
 
 var listTmuxOutput = func(args ...string) ([]byte, error) {
-	return exec.Command("tmux", args...).Output()
+	return exec.Command("tmux", args...).CombinedOutput()
 }
 
 func Available() bool {
@@ -41,7 +41,7 @@ func (p Pane) Target() string {
 func ListSessions() ([]Session, error) {
 	out, err := listTmuxOutput("list-sessions", "-F", "#{session_name}|#{session_path}")
 	if err != nil {
-		if noTmuxServer(err) {
+		if noTmuxServer(out, err) {
 			return nil, nil
 		}
 		return nil, err
@@ -166,7 +166,7 @@ func RenameSession(oldName, newName string) error {
 func ListPanes() ([]Pane, error) {
 	out, err := listTmuxOutput("list-panes", "-a", "-F", "#{session_name}|#{window_index}|#{pane_index}|#{pane_pid}")
 	if err != nil {
-		if noTmuxServer(err) {
+		if noTmuxServer(out, err) {
 			return nil, nil
 		}
 		return nil, err
@@ -174,14 +174,16 @@ func ListPanes() ([]Pane, error) {
 	return parseListPanes(string(out)), nil
 }
 
-func noTmuxServer(err error) bool {
+func noTmuxServer(out []byte, err error) bool {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		return false
 	}
-	stderr := strings.ToLower(string(exitErr.Stderr))
-	return strings.Contains(stderr, "no server running") ||
-		strings.Contains(stderr, "failed to connect to server")
+	message := strings.ToLower(string(out) + "\n" + string(exitErr.Stderr))
+	return strings.Contains(message, "no server running") ||
+		strings.Contains(message, "failed to connect to server") ||
+		(strings.Contains(message, "error connecting to") &&
+			strings.Contains(message, "no such file or directory"))
 }
 
 // ListPanesWithTitle returns panes including the pane title.

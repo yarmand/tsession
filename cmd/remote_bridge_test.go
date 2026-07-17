@@ -24,9 +24,41 @@ func TestRemoteBridgeNameIsStableAndSanitized(t *testing.T) {
 
 func TestRemoteResumeCommandQuotesSessionIDForTmuxShell(t *testing.T) {
 	got := remoteResumeCommand("$(touch /tmp/tsession-injected)")
-	want := "exec copilot --resume='$(touch /tmp/tsession-injected)'"
+	probe := "exec /bin/sh -c " + shellQuote("command -v copilot")
+	resolver := `remote_shell=${SHELL:-/bin/sh}; ` +
+		`case "${remote_shell##*/}" in csh|tcsh) shell_flags=-ic ;; *) shell_flags=-lic ;; esac; ` +
+		`copilot_bin=$("$remote_shell" "$shell_flags" ` + shellQuote(probe) + ` 2>/dev/null | tail -n 1); ` +
+		`case "$copilot_bin" in /*) ;; *) echo 'copilot resolver did not return an absolute path' >&2; exit 127 ;; esac; ` +
+		`if [ ! -x "$copilot_bin" ]; then echo 'copilot not found in remote interactive shell PATH' >&2; exit 127; fi; `
+	want := resolver + `exec "$copilot_bin" --resume='$(touch /tmp/tsession-injected)'`
 	if got != want {
 		t.Fatalf("resume command = %q, want %q", got, want)
+	}
+}
+
+func TestRemoteCopilotResolverSupportsCshInteractiveFlags(t *testing.T) {
+	got := remoteCopilotResolverCommand()
+	if !strings.Contains(got, `case "${remote_shell##*/}" in csh|tcsh) shell_flags=-ic`) {
+		t.Fatalf("resolver does not select csh-compatible interactive flags: %q", got)
+	}
+	if !strings.Contains(got, `*) shell_flags=-lic`) {
+		t.Fatalf("resolver does not preserve login interactive flags for Bourne shells: %q", got)
+	}
+}
+
+func TestRemoteSessionShellCommandResolvesCopilotBeforeCreatingTmuxFallback(t *testing.T) {
+	s := sessions.Session{ID: "abcdefgh-1234", RemoteTmuxAvailable: true}
+	got := remoteSessionShellCommand(s)
+	resolverEnd := strings.Index(got, "tmux new-session")
+	if resolverEnd < 0 || !strings.Contains(got[:resolverEnd], "command -v copilot") {
+		t.Fatalf("Copilot is not resolved before tmux fallback creation: %q", got)
+	}
+	if !strings.Contains(got, `-e TSESSION_COPILOT_BIN="$copilot_bin"`) {
+		t.Fatalf("resolved Copilot path is not passed into remote tmux: %q", got)
+	}
+	resume := shellQuote(`exec "$TSESSION_COPILOT_BIN" --resume=` + shellQuote(s.ID))
+	if !strings.Contains(got, resume) {
+		t.Fatalf("remote tmux command does not use its Copilot environment path: %q", got)
 	}
 }
 
@@ -40,11 +72,16 @@ func TestRemoteSessionShellCommandCreatesFallbackTmuxSession(t *testing.T) {
 	if !strings.Contains(got, "tmux has-session -t "+fallback) {
 		t.Fatalf("fallback lookup missing from %q", got)
 	}
-	if !strings.Contains(got, "tmux new-session -d -s "+fallback+" "+shellQuote(remoteResumeCommand(s.ID))) {
+	if !strings.Contains(got, "tmux new-session -d -s "+fallback+
+		` -e TSESSION_COPILOT_BIN="$copilot_bin" `+shellQuote(remoteTmuxResumeCommand(s.ID))) {
 		t.Fatalf("nested resume command is not safely quoted in %q", got)
 	}
 	if !strings.Contains(got, "exec tmux attach-session -t "+fallback) {
 		t.Fatalf("fallback attach missing from %q", got)
+	}
+	recheck := "|| { tmux has-session -t " + fallback + " 2>/dev/null || exit $?; }"
+	if !strings.Contains(got, recheck) {
+		t.Fatalf("concurrent fallback creation is not rechecked in %q", got)
 	}
 }
 
@@ -131,7 +168,7 @@ func TestRemoteBridgeCommandDevcontainerWithoutTmuxResumesDirectly(t *testing.T)
 	if bin != "docker" || !reflect.DeepEqual(args[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("command = %s %v", bin, args)
 	}
-	if args[len(args)-1] != "exec copilot --resume='abcdefgh-1234'" {
+	if args[len(args)-1] != remoteResumeCommand("abcdefgh-1234") {
 		t.Fatalf("remote command = %q", args[len(args)-1])
 	}
 }

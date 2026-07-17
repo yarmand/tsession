@@ -50,8 +50,22 @@ func remoteFallbackTmuxName(sessionID string) string {
 	return fmt.Sprintf("tsession-%x", sum[:6])
 }
 
+func remoteCopilotResolverCommand() string {
+	probe := "exec /bin/sh -c " + shellQuote("command -v copilot")
+	return `remote_shell=${SHELL:-/bin/sh}; ` +
+		`case "${remote_shell##*/}" in csh|tcsh) shell_flags=-ic ;; *) shell_flags=-lic ;; esac; ` +
+		`copilot_bin=$("$remote_shell" "$shell_flags" ` + shellQuote(probe) + ` 2>/dev/null | tail -n 1); ` +
+		`case "$copilot_bin" in /*) ;; *) echo 'copilot resolver did not return an absolute path' >&2; exit 127 ;; esac; ` +
+		`if [ ! -x "$copilot_bin" ]; then echo 'copilot not found in remote interactive shell PATH' >&2; exit 127; fi; `
+}
+
 func remoteResumeCommand(sessionID string) string {
-	return "exec copilot --resume=" + shellQuote(sessionID)
+	return remoteCopilotResolverCommand() +
+		`exec "$copilot_bin" --resume=` + shellQuote(sessionID)
+}
+
+func remoteTmuxResumeCommand(sessionID string) string {
+	return `exec "$TSESSION_COPILOT_BIN" --resume=` + shellQuote(sessionID)
 }
 
 func remoteSessionShellCommand(s sessions.Session) string {
@@ -60,10 +74,13 @@ func remoteSessionShellCommand(s sessions.Session) string {
 	}
 
 	fallback := shellQuote(remoteFallbackTmuxName(s.ID))
-	resume := shellQuote(remoteResumeCommand(s.ID))
-	createAndAttach := "tmux has-session -t " + fallback +
-		" 2>/dev/null || tmux new-session -d -s " + fallback + " " + resume +
-		"; exec tmux attach-session -t " + fallback
+	resume := shellQuote(remoteTmuxResumeCommand(s.ID))
+	createAndAttach := "if ! tmux has-session -t " + fallback +
+		" 2>/dev/null; then " + remoteCopilotResolverCommand() +
+		"tmux new-session -d -s " + fallback +
+		` -e TSESSION_COPILOT_BIN="$copilot_bin" ` + resume +
+		" || { tmux has-session -t " + fallback + " 2>/dev/null || exit $?; }" +
+		"; fi; exec tmux attach-session -t " + fallback
 	if s.RemoteTmuxTarget == "" {
 		return createAndAttach
 	}

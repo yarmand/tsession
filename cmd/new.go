@@ -35,7 +35,7 @@ func validateNewArgs(branch, path string) error {
 // Every forwarded argument is shell-quoted so embedded spaces or metacharacters
 // are passed to copilot intact.
 func buildCopilotCommand(extra []string) string {
-	cmd := "copilot"
+	cmd := "agency copilot --hub"
 	for _, a := range extra {
 		cmd += " " + shellQuote(a)
 	}

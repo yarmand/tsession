@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yarma/tsession/internal/config"
+	"github.com/yarma/tsession/internal/remote"
+	"github.com/yarma/tsession/internal/reponames"
 	"github.com/yarma/tsession/internal/sessions"
 )
 
@@ -102,6 +106,110 @@ func TestRunFzfOptsBindsDistinctSessionAndRepositoryRenameShortcuts(t *testing.T
 		" rename {2})+reload(",
 		"--bind=ctrl-N:execute-silent(tmux display-popup -E -w 99% -h 5 ",
 		" rename-repo {2})+reload(",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fzf argv %q does not contain %q", got, want)
+		}
+	}
+}
+
+func TestInitialListBytes_UsesRepositoryAliasesAcrossLocalAndRemoteSections(t *testing.T) {
+	writeConfigFile(t, `remotes:
+  - name: devbox
+    host: devbox.example.com
+`)
+	if err := reponames.Set("https://github.com/example/repository-aliases", "team-repo"); err != nil {
+		t.Fatalf("reponames.Set() error = %v", err)
+	}
+
+	oldLoadAllLive := loadAllLiveFn
+	oldFetch := fetchRemoteSessions
+	t.Cleanup(func() {
+		loadAllLiveFn = oldLoadAllLive
+		fetchRemoteSessions = oldFetch
+	})
+
+	loadAllLiveFn = func(time.Duration) ([]sessions.Session, error) {
+		return []sessions.Session{{
+			ID:         "local",
+			CWD:        filepath.Join("/worktrees", "feat-local"),
+			Repository: "git@github.com:example/repository-aliases.git",
+			Summary:    "local summary",
+			UpdatedAt:  time.Now().UTC(),
+			State:      sessions.StateWorking,
+		}}, nil
+	}
+	fetchRemoteSessions = func(ctx context.Context, remotes []config.Remote, maxAge, timeout time.Duration, opts remote.FetchOptions) (map[string][]sessions.Session, []string) {
+		return map[string][]sessions.Session{
+			"devbox": {{
+				ID:         "remote",
+				Origin:     "devbox",
+				CWD:        filepath.Join("/remote", "feat-remote"),
+				Repository: "https://github.com/example/repository-aliases.git",
+				Summary:    "remote summary",
+				UpdatedAt:  time.Now().UTC(),
+				State:      sessions.StateActiveIdle,
+			}},
+		}, nil
+	}
+
+	got, err := initialListBytes(24*time.Hour, false, true, 0, false)
+	if err != nil {
+		t.Fatalf("initialListBytes() error = %v", err)
+	}
+	for _, want := range []string{
+		"[team-repo]feat-local",
+		"[team-repo]feat-remote",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("initialListBytes() output missing %q:\n%s", want, got)
+		}
+	}
+
+	rows := make(map[string][]string)
+	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) == 10 {
+			rows[fields[1]] = fields
+		}
+	}
+	if got := rows["local"][8]; got != "" {
+		t.Fatalf("local legend field = %q, want empty", got)
+	}
+	if got := rows["remote"][2]; got != "https://github.com/example/repository-aliases.git" {
+		t.Fatalf("remote repo field = %q, want original repository", got)
+	}
+	if got := rows["remote"][9]; got != "devbox" {
+		t.Fatalf("remote origin field = %q, want devbox", got)
+	}
+}
+
+func TestRunFzfOpts_ShortPreviewKeepsStableFieldPositions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	oldLoadAllLive := loadAllLiveFn
+	t.Cleanup(func() { loadAllLiveFn = oldLoadAllLive })
+	loadAllLiveFn = func(time.Duration) ([]sessions.Session, error) {
+		return nil, nil
+	}
+
+	binDir := t.TempDir()
+	fzfPath := filepath.Join(binDir, "fzf")
+	script := "#!/bin/sh\nprintf '%s\n' \"$@\"\n"
+	if err := os.WriteFile(fzfPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fzf) error = %v", err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	got, err := runFzfOpts(14*24*time.Hour, "", false, false, true, 0, true, false, "", false)
+	if err != nil {
+		t.Fatalf("runFzfOpts() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"--accept-nth=2",
+		"Repo: %s",
+		"_ {2} {6} {7} {4} {3} {8} {9} {10}",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("fzf argv %q does not contain %q", got, want)

@@ -14,6 +14,7 @@ import (
 	"github.com/yarma/tsession/internal/notify"
 	"github.com/yarma/tsession/internal/remote"
 	"github.com/yarma/tsession/internal/render"
+	"github.com/yarma/tsession/internal/reponames"
 	"github.com/yarma/tsession/internal/sessions"
 	"github.com/yarma/tsession/internal/tmux"
 )
@@ -79,9 +80,9 @@ func List(args []string) error {
 	}
 	now := time.Now()
 
-	var shortCtx render.ShortContext
-	if useShort {
-		shortCtx = render.BuildShortContext(all)
+	shortCtx, err := loadShortRenderContext(all, useShort)
+	if err != nil {
+		return err
 	}
 
 	if !*fzfMode {
@@ -109,6 +110,17 @@ func List(args []string) error {
 		renderSessionList(os.Stdout, remoteMap[name], now, color, *fzfMode, useShort, shortCtx, *lshort)
 	}
 	return nil
+}
+
+func loadShortRenderContext(all []sessions.Session, useShort bool) (render.ShortContext, error) {
+	if !useShort {
+		return render.ShortContext{}, nil
+	}
+	aliases, err := reponames.Load()
+	if err != nil {
+		return render.ShortContext{}, err
+	}
+	return render.BuildShortContextWithAliases(all, aliases), nil
 }
 
 func renderSessionList(w io.Writer, list []sessions.Session, now time.Time, color, fzfMode, useShort bool, shortCtx render.ShortContext, lshort int) {
@@ -149,6 +161,8 @@ func writeFzfSession(w io.Writer, s sessions.Session, display string, now time.T
 	if summary == "" {
 		summary = "(no summary)"
 	}
+	// Keep field positions stable for browse bindings and preview:
+	// 2=id, 3=repository, 8=summary, 9=legacy legend placeholder, 10=origin.
 	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 		display,
 		s.ID,

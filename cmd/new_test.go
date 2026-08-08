@@ -75,10 +75,10 @@ func TestParseNewArgs(t *testing.T) {
 }
 
 func TestBuildCopilotCommand(t *testing.T) {
-	if got := buildCopilotCommand(nil); got != "copilot" {
-		t.Errorf("got %q, want copilot", got)
+	if got := buildCopilotCommand(nil); got != "agency copilot --hub" {
+		t.Errorf("got %q, want agency copilot --hub", got)
 	}
-	if got := buildCopilotCommand([]string{"--resume", "x y"}); got != "copilot '--resume' 'x y'" {
+	if got := buildCopilotCommand([]string{"--resume", "x y"}); got != "agency copilot --hub '--resume' 'x y'" {
 		t.Errorf("got %q", got)
 	}
 }

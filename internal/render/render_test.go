@@ -184,6 +184,27 @@ func TestBuildShortContextWithAliases_LeavesLegendFieldEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildShortContextWithAliases_NormalizesAcrossRepositoryForms(t *testing.T) {
+	const httpsRepo = "https://github.com/yarmand/yammer-service-infra-configuration.git"
+	const sshRepo = "git@github.com:yarmand/yammer-service-infra-configuration.git"
+	ctx := BuildShortContextWithAliases([]sessions.Session{
+		{Repository: httpsRepo},
+		{Repository: sshRepo},
+	}, map[string]string{
+		repository.Normalize(httpsRepo): "team-infra",
+	})
+
+	for _, repo := range []string{httpsRepo, sshRepo} {
+		display, ok := ctx.repositoryDisplayFor(repo)
+		if !ok {
+			t.Fatalf("repositoryDisplayFor(%q) missing", repo)
+		}
+		if display.label != "team-infra" {
+			t.Fatalf("repositoryDisplayFor(%q).label = %q, want team-infra", repo, display.label)
+		}
+	}
+}
+
 func TestFormatLineShort_LshortPreservesAge(t *testing.T) {
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	s := sessions.Session{

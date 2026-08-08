@@ -205,7 +205,7 @@ Keybindings:
 	if useShort {
 		fzfArgs = append(fzfArgs,
 			"--preview-window=down:12:wrap",
-			`--preview=sh -c 'legend=$(printf "%b" "$7"); printf "ID: %s\nState: %s\nAge: %s\nCWD: %s\nRepo: %s\n\n%s\n\nOrigins:\n%s\n" "$1" "$2" "$3" "$4" "$5" "$6" "$legend"' _ {2} {6} {7} {4} {3} {8} {9}`,
+			`--preview=sh -c 'legend=$(printf "%b" "$7"); origin=$(printf "%b" "$8"); origins=$origin; if [ -n "$legend" ]; then origins=$legend; fi; if [ -z "$origins" ]; then origins=local; fi; printf "ID: %s\nState: %s\nAge: %s\nCWD: %s\nRepo: %s\n\n%s\n\nOrigins:\n%s\n" "$1" "$2" "$3" "$4" "$5" "$6" "$origins"' _ {2} {6} {7} {4} {3} {8} {9} {10}`,
 		)
 	}
 	autoIn5s := autoReload && !popup
@@ -231,16 +231,9 @@ Keybindings:
 	// Refresh keeps working via ctrl-r and the popup-mode curl loop.
 	stdin, err := initialListBytes(maxAge, active, short, lshort, localOnly)
 	if err != nil {
-		// Non-fatal: fall back to empty stdin + reload-on-start so the
-		// picker still works even if the cache + live load both failed.
-		fmt.Fprintln(os.Stderr, "warning: initial list load failed, using reload-on-start:", err)
-		fzfArgs = append(fzfArgs, "--bind=start:reload("+reloadCmd+")")
-		cmd = exec.Command("fzf", fzfArgs...)
-		cmd.Stderr = os.Stderr
-		cmd.Stdin = nil
-	} else {
-		cmd.Stdin = strings.NewReader(stdin)
+		return "", err
 	}
+	cmd.Stdin = strings.NewReader(stdin)
 
 	out, err := cmd.Output()
 	if err != nil {
@@ -281,9 +274,9 @@ func initialListBytes(maxAge time.Duration, active, short bool, lshort int, loca
 	}
 	now := time.Now()
 
-	var shortCtx render.ShortContext
-	if useShort {
-		shortCtx = render.BuildShortContext(all)
+	shortCtx, err := loadShortRenderContext(all, useShort)
+	if err != nil {
+		return "", err
 	}
 
 	var b strings.Builder

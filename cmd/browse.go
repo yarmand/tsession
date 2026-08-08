@@ -163,7 +163,7 @@ Keybindings:
   enter     Switch to session
   ctrl-e    Open in VS Code
   ctrl-n    Rename session
-  ctrl-N    Rename repository
+  ctrl-a    Rename repository
   ctrl-r    Reload list
   ?         Show this help
   esc/q     Exit`
@@ -171,10 +171,10 @@ Keybindings:
 	renameCmd := shellQuote(self) + " rename {2}"
 	renameRepoCmd := shellQuote(self) + " rename-repo {2}"
 	renameBinding := "--bind=ctrl-n:execute(" + renameCmd + ")+reload(" + reloadCmd + ")"
-	renameRepoBinding := "--bind=ctrl-N:execute(" + renameRepoCmd + ")+reload(" + reloadCmd + ")"
+	renameRepoBinding := "--bind=ctrl-a:execute(" + renameRepoCmd + ")+reload(" + reloadCmd + ")"
 	if tmux.InTmux() {
 		renameBinding = "--bind=ctrl-n:execute-silent(tmux display-popup -E -w 99% -h 5 " + shellQuote(self) + " rename {2})+reload(" + reloadCmd + ")"
-		renameRepoBinding = "--bind=ctrl-N:execute-silent(tmux display-popup -E -w 99% -h 5 " + shellQuote(self) + " rename-repo {2})+reload(" + reloadCmd + ")"
+		renameRepoBinding = "--bind=ctrl-a:execute-silent(tmux display-popup -E -w 99% -h 5 " + shellQuote(self) + " rename-repo {2})+reload(" + reloadCmd + ")"
 	}
 
 	fzfArgs := []string{
@@ -189,7 +189,7 @@ Keybindings:
 		"--header-first",
 		"--prompt=session> ",
 		"--border=none",
-		"--footer= ●working ◐question ✓done ○active ·idle\n ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename session | ctrl-N: rename repository | ctrl-r: reload | esc: exit",
+		"--footer= ●working ◐question ✓done ○active ·idle\n ?: help | enter: switch | ctrl-e: vscode | ctrl-n: rename session | ctrl-a: rename repository | ctrl-r: reload | esc: exit",
 		"--footer-border=none",
 		"--color=footer:blue:bold",
 		enterBinding(self, target),

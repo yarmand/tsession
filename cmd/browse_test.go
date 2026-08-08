@@ -104,12 +104,47 @@ func TestRunFzfOptsBindsDistinctSessionAndRepositoryRenameShortcuts(t *testing.T
 	for _, want := range []string{
 		"--bind=ctrl-n:execute-silent(tmux display-popup -E -w 99% -h 5 ",
 		" rename {2})+reload(",
-		"--bind=ctrl-N:execute-silent(tmux display-popup -E -w 99% -h 5 ",
+		"--bind=ctrl-a:execute-silent(tmux display-popup -E -w 99% -h 5 ",
 		" rename-repo {2})+reload(",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("fzf argv %q does not contain %q", got, want)
 		}
+	}
+}
+
+func TestRunFzfOpts_HelpAndFooterUseCtrlAForRepositoryRename(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	oldLoadAllLive := loadAllLiveFn
+	t.Cleanup(func() { loadAllLiveFn = oldLoadAllLive })
+	loadAllLiveFn = func(time.Duration) ([]sessions.Session, error) {
+		return nil, nil
+	}
+
+	binDir := t.TempDir()
+	fzfPath := filepath.Join(binDir, "fzf")
+	script := "#!/bin/sh\nprintf '%s\n' \"$@\"\n"
+	if err := os.WriteFile(fzfPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fzf) error = %v", err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	got, err := runFzfOpts(14*24*time.Hour, "", false, false, false, 0, true, false, "", false)
+	if err != nil {
+		t.Fatalf("runFzfOpts() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"ctrl-a: rename repository",
+		"ctrl-a    Rename repository",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fzf argv %q does not contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "ctrl-N") {
+		t.Fatalf("fzf argv %q unexpectedly contains ctrl-N", got)
 	}
 }
 

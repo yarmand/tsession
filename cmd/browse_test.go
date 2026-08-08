@@ -219,6 +219,38 @@ func TestInitialListBytes_UsesRepositoryAliasesAcrossLocalAndRemoteSections(t *t
 	}
 }
 
+func TestInitialListBytes_ReturnsAliasLoadError(t *testing.T) {
+	homeRoot := t.TempDir()
+	homeFile := filepath.Join(homeRoot, "home")
+	if err := os.WriteFile(homeFile, []byte("not-a-directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile(home file) error = %v", err)
+	}
+	t.Setenv("HOME", homeFile)
+
+	oldLoadAllLive := loadAllLiveFn
+	t.Cleanup(func() { loadAllLiveFn = oldLoadAllLive })
+	loadAllLiveFn = func(time.Duration) ([]sessions.Session, error) {
+		return []sessions.Session{{
+			ID:      "local",
+			CWD:     filepath.Join("/worktrees", "feat-local"),
+			Summary: "local summary",
+			UpdatedAt: time.Now().UTC(),
+			State:   sessions.StateWorking,
+		}}, nil
+	}
+
+	got, err := initialListBytes(24*time.Hour, false, true, 0, true)
+	if err == nil {
+		t.Fatal("initialListBytes() error = nil, want alias load error")
+	}
+	if got != "" {
+		t.Fatalf("initialListBytes() output = %q, want empty on error", got)
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("initialListBytes() error = %v, want alias load failure", err)
+	}
+}
+
 func TestRunFzfOpts_ShortPreviewKeepsStableFieldPositions(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 

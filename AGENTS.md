@@ -144,6 +144,12 @@ resumes it; if it exists at a different path, `new` uses a unique suffixed name.
 
 ## Session Names
 
+Picker shortcuts:
+- `ctrl-n` Rename session
+- `ctrl-N` Rename repository
+
 Sessions can be given custom display names via `ctrl-n` in the picker or `tsession rename <id> [name]`. Names are stored in `~/.tsession/names.json` and shown in the `NAME` column.
+
+Repositories can be given shared short aliases via `ctrl-N` in the picker or `tsession rename-repo <id> [alias]`. Aliases are stored in `~/.tsession/repo-names.json` and are used by the alias-aware short renderer.
 
 When a session has a corresponding tmux session, renaming also renames the tmux session. To clear a name, rename with an empty string.

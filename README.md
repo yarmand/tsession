@@ -52,7 +52,8 @@ Then `Alt-s` opens the picker as an overlay from any pane. Select a session and 
 |-----|--------|
 | `enter` | Switch to the selected session |
 | `ctrl-e` | Open session directory in VS Code |
-| `ctrl-n` | Rename the session |
+| `ctrl-n` | Rename session |
+| `ctrl-N` | Rename repository |
 | `ctrl-r` | Reload the session list |
 | `?` | Show help in the preview pane |
 | `esc`/`q` | Exit the picker |

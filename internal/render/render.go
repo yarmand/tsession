@@ -17,15 +17,15 @@ func FormatLine(s sessions.Session, now time.Time, color bool) string {
 }
 
 // FormatLineShort renders the compact display form. For best results (origin
-// letters + legend), prefer FormatLineShortWithContext with a context built from
-// the full session list.
+// labels), prefer FormatLineShortWithContext with a context built from the full
+// session list.
 func FormatLineShort(s sessions.Session, now time.Time, color bool) string {
 	return FormatLineShortWithContext(s, now, color, ShortContext{}, 0)
 }
 
-// FormatLineShortWithContext renders a --short line with the provided origin-letter
-// context. If lshort > 0, the display is truncated to at most lshort runes while
-// preserving the age suffix.
+// FormatLineShortWithContext renders a --short line with the provided
+// repository-label context. If lshort > 0, the display is truncated to at most
+// lshort runes while preserving the age suffix.
 func FormatLineShortWithContext(s sessions.Session, now time.Time, color bool, ctx ShortContext, lshort int) string {
 	ts := s.LastEventAt
 	if ts.IsZero() {
@@ -39,11 +39,13 @@ func FormatLineShortWithContext(s sessions.Session, now time.Time, color bool, c
 	}
 
 	src := sourceGlyph(s.Source)
-	letter := ctx.letterForOrigin(s.Repository)
 	name := shortWorktreeName(s)
 	repoCol := name
-	if letter != "" {
-		repoCol = letter + "-" + name
+	if display, ok := ctx.repositoryDisplayFor(s.Repository); ok {
+		repoCol = "[" + display.compact + "]"
+		if display.label != name {
+			repoCol += name
+		}
 	}
 
 	summary := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s.Summary, "\n", " "), "\r", " "), "\t", " ")

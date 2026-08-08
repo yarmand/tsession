@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yarma/tsession/internal/repository"
 	"github.com/yarma/tsession/internal/sessions"
 )
 
@@ -76,12 +77,12 @@ func TestOriginShortName(t *testing.T) {
 	}
 }
 
-func TestFormatLineShort_GlyphOnlyAndAgeAtEnd(t *testing.T) {
+func TestFormatLineShort_UsesRepositoryShortNameLabel(t *testing.T) {
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	s := sessions.Session{
 		ID:          "uuid-123",
-		CWD:         "/tmp/worktrees/better-short",
-		Repository:  "ps://github.com/yarmand/tsession.git",
+		CWD:         "/tmp/feature",
+		Repository:  "https://github.com/yarmand/yammer-service-infra-configuration",
 		Summary:     "do the thing",
 		LastEventAt: now.Add(-5 * time.Minute),
 		State:       sessions.StateWorking,
@@ -99,8 +100,11 @@ func TestFormatLineShort_GlyphOnlyAndAgeAtEnd(t *testing.T) {
 	if !strings.Contains(display, "●") {
 		t.Fatalf("short display should contain glyph: %q", display)
 	}
-	if !strings.Contains(display, "A-better-short") {
-		t.Fatalf("short display should contain origin-letter prefixed worktree: %q", display)
+	if !strings.Contains(display, "[yammer-ser]feature") {
+		t.Fatalf("short display should contain repository label: %q", display)
+	}
+	if strings.Contains(display, "A-") {
+		t.Fatalf("short display should not contain origin letters: %q", display)
 	}
 	trim := strings.TrimRight(display, " ")
 	if !strings.HasSuffix(trim, "5m") {
@@ -108,12 +112,84 @@ func TestFormatLineShort_GlyphOnlyAndAgeAtEnd(t *testing.T) {
 	}
 }
 
+func TestFormatLineShort_UsesCustomAliasLabel(t *testing.T) {
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	const repo = "https://github.com/yarmand/yammer-service-infra-configuration"
+	s := sessions.Session{
+		ID:          "uuid-123",
+		CWD:         "/tmp/feature",
+		Repository:  "git@github.com:yarmand/yammer-service-infra-configuration.git",
+		Summary:     "do the thing",
+		LastEventAt: now.Add(-5 * time.Minute),
+		State:       sessions.StateWorking,
+	}
+	ctx := BuildShortContextWithAliases([]sessions.Session{s}, map[string]string{
+		repository.Normalize(repo): "team-infra",
+	})
+	got := FormatLineShortWithContext(s, now, false, ctx, 0)
+	display := strings.Split(got, "\t")[0]
+	if !strings.Contains(display, "[team-infra]feature") {
+		t.Fatalf("short display should contain custom alias label: %q", display)
+	}
+}
+
+func TestFormatLineShort_HidesWorktreeWhenRepositoryMatches(t *testing.T) {
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	s := sessions.Session{
+		ID:          "uuid-123",
+		CWD:         "/tmp/feature",
+		Repository:  "https://github.com/yarmand/feature",
+		Summary:     "do the thing",
+		LastEventAt: now.Add(-5 * time.Minute),
+		State:       sessions.StateWorking,
+	}
+	ctx := buildShortContext([]sessions.Session{s})
+	got := FormatLineShortWithContext(s, now, false, ctx, 0)
+	display := strings.Split(got, "\t")[0]
+	if !strings.Contains(display, "[feature]") {
+		t.Fatalf("short display should contain repository label only: %q", display)
+	}
+	if strings.Contains(display, "[feature]feature") {
+		t.Fatalf("short display should omit duplicated worktree name: %q", display)
+	}
+}
+
+func TestFormatLineShort_FallsBackToWorktreeWithoutRepository(t *testing.T) {
+	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
+	s := sessions.Session{
+		ID:          "uuid-123",
+		CWD:         "/tmp/feature",
+		Summary:     "do the thing",
+		LastEventAt: now.Add(-5 * time.Minute),
+		State:       sessions.StateWorking,
+	}
+	ctx := buildShortContext([]sessions.Session{s})
+	got := FormatLineShortWithContext(s, now, false, ctx, 0)
+	display := strings.Split(got, "\t")[0]
+	if !strings.Contains(display, "feature") {
+		t.Fatalf("short display should fall back to worktree basename: %q", display)
+	}
+	if strings.Contains(display, "[") {
+		t.Fatalf("short display should not show repository brackets without a repository: %q", display)
+	}
+}
+
+func TestBuildShortContextWithAliases_LeavesLegendFieldEmpty(t *testing.T) {
+	s := sessions.Session{Repository: "https://github.com/yarmand/yammer-service-infra-configuration"}
+	ctx := BuildShortContextWithAliases([]sessions.Session{s}, map[string]string{
+		repository.Normalize(s.Repository): "team-infra",
+	})
+	if got := ctx.LegendField(); got != "" {
+		t.Fatalf("LegendField() = %q, want empty", got)
+	}
+}
+
 func TestFormatLineShort_LshortPreservesAge(t *testing.T) {
 	now := time.Date(2026, 5, 26, 12, 0, 0, 0, time.UTC)
 	s := sessions.Session{
 		ID:          "uuid-123",
-		CWD:         "/tmp/worktrees/better-short",
-		Repository:  "ps://github.com/yarmand/tsession.git",
+		CWD:         "/tmp/feature",
+		Repository:  "https://github.com/yarmand/yammer-service-infra-configuration",
 		Summary:     strings.Repeat("x", 200),
 		LastEventAt: now.Add(-5 * time.Minute),
 		State:       sessions.StateWorking,

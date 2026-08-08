@@ -7,24 +7,40 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/yarma/tsession/internal/repository"
 )
 
 const (
-	dirName  = ".tsession"
-	fileName = "repo-names.json"
+	dirName      = ".tsession"
+	fileName     = "repo-names.json"
+	lockFileName = "repo-names.lock"
 )
 
-var mu sync.Mutex
+var (
+	mu         sync.Mutex
+	readFile   = os.ReadFile
+	writeFile  = os.WriteFile
+	renameFile = os.Rename
+	openFile   = os.OpenFile
+)
 
-func path() (string, error) {
+func dir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	d := filepath.Join(home, dirName)
 	if err := os.MkdirAll(d, 0o755); err != nil {
+		return "", err
+	}
+	return d, nil
+}
+
+func path() (string, error) {
+	d, err := dir()
+	if err != nil {
 		return "", err
 	}
 	return filepath.Join(d, fileName), nil
@@ -37,7 +53,11 @@ func Load() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(p)
+	return loadFromPath(p)
+}
+
+func loadFromPath(p string) (map[string]string, error) {
+	data, err := readFile(p)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return map[string]string{}, nil
@@ -54,6 +74,33 @@ func Load() (map[string]string, error) {
 	return m, nil
 }
 
+func lock(path string) (func(), error) {
+	f, err := openFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}, nil
+}
+
+func writeAtomically(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := writeFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	if err := renameFile(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 // Get returns the stored alias for a repository, or "" if none.
 func Get(repositoryID string) (string, error) {
 	m, err := Load()
@@ -66,16 +113,28 @@ func Get(repositoryID string) (string, error) {
 // Set stores an alias for the given repository identity. An empty alias
 // removes the entry.
 func Set(repositoryID, alias string) error {
-	mu.Lock()
-	defer mu.Unlock()
-
-	m, err := Load()
-	if err != nil {
-		m = map[string]string{}
-	}
 	key := repository.Normalize(repositoryID)
 	if key == "" {
 		return nil
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	d, err := dir()
+	if err != nil {
+		return err
+	}
+	unlock, err := lock(filepath.Join(d, lockFileName))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	p := filepath.Join(d, fileName)
+	m, err := loadFromPath(p)
+	if err != nil {
+		return err
 	}
 	if alias == "" {
 		delete(m, key)
@@ -86,9 +145,5 @@ func Set(repositoryID, alias string) error {
 	if err != nil {
 		return err
 	}
-	p, err := path()
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(p, data, 0o644)
+	return writeAtomically(p, data)
 }

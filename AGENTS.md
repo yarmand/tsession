@@ -106,6 +106,7 @@ tsession browse [flags] [q]                  # fzf picker in current terminal
 tsession popup [flags]                       # fzf picker designed for tmux popup
 tsession resume [--target=..] <session-id>   # switch tmux pane (or fall back)
 tsession rename <session-id> [name]          # rename a session
+tsession rename-repo <session-id> [alias]    # rename a repository
 tsession vscode <session-id>                 # open session directory in VS Code
 tsession watch [--daemon]                    # refresh cache every --interval (default 10s)
 tsession stop-watch                          # stop a running watch process
@@ -133,7 +134,7 @@ resumes it; if it exists at a different path, `new` uses a unique suffixed name.
 |------|-------------|
 | `--max-age <dur>` | Ignore sessions older than this (default `336h` = 14 days) |
 | `--active` | Only show sessions attached to tmux whose state is neither `exited` nor `unknown` |
-| `--short` | Compact rendering: state glyph, `originLetter-basename(cwd)`, summary (30 chars), age suffix. In `browse`/`popup`, shows a right-side preview with an origin legend. |
+| `--short` | Compact rendering: state glyph, compact repository label (`[repository-or-alias]worktree` when repository data is available, otherwise the worktree basename), summary (30 chars), age suffix. |
 | `--lshort <n>` | Implies `--short`; truncate each display line to `n` characters (preserves age suffix). Disables color. |
 | `--no-color` | (list only) Disable ANSI colors |
 | `--fzf` | (list only) Tab-delimited output for fzf consumption (display + selection ID) |
@@ -146,10 +147,10 @@ resumes it; if it exists at a different path, `new` uses a unique suffixed name.
 
 Picker shortcuts:
 - `ctrl-n` Rename session
-- `ctrl-N` Rename repository
+- `ctrl-a` Rename repository
 
 Sessions can be given custom display names via `ctrl-n` in the picker or `tsession rename <id> [name]`. Names are stored in `~/.tsession/names.json` and shown in the `NAME` column.
 
-Repositories can be given shared short aliases via `ctrl-N` in the picker or `tsession rename-repo <id> [alias]`. Aliases are stored in `~/.tsession/repo-names.json` and are used by the alias-aware short renderer.
+Repositories can be given shared short aliases via `ctrl-a` in the picker or `tsession rename-repo <id> [alias]`. Aliases are stored in `~/.tsession/repo-names.json` and are used in `--short` rendering.
 
 When a session has a corresponding tmux session, renaming also renames the tmux session. To clear a name, rename with an empty string.

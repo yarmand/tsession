@@ -2,7 +2,7 @@
 
 ## Goal
 
-Improve `--short` readability by replacing origin-letter prefixes with a compact repository label and add a separate shortcut for renaming that repository label.
+Improve `--short` readability by replacing origin-letter prefixes with a compact repository alias and add a separate shortcut for renaming that alias.
 
 ## User-visible behavior
 
@@ -32,13 +32,13 @@ Extend the short-render context to resolve the repository identity, alias, compa
 
 Keep `ctrl-n` mapped to the existing per-session rename command.
 
-Add `ctrl-N` as a repository-alias action. It opens a small tmux popup when browsing inside tmux, otherwise executes directly, showing the selected session's repository and current alias. The command accepts a new alias or an empty value to clear it, persists the result, and reloads the picker. If the selected session has no repository identity, report an explicit error rather than silently changing unrelated state.
+Add `ctrl-a` as a repository-alias action. It opens a small tmux popup when browsing inside tmux, otherwise executes directly, showing the selected session's repository and current alias. The command accepts a new alias or an empty value to clear it, persists the result, and reloads the picker. If the selected session has no repository identity, report an explicit error rather than silently changing unrelated state.
 
 Update help text, footer text, and README keybinding documentation to distinguish:
 
 ```text
 ctrl-n  Rename session
-ctrl-N  Rename repository
+ctrl-a  Rename repository alias
 ```
 
 ## Error handling
@@ -56,7 +56,7 @@ Add focused tests for:
 - fallback behavior when repository data is missing;
 - short rendering through list and browse/fzf contexts;
 - `--lshort` line limits and age preservation;
-- separate `ctrl-n` and `ctrl-N` binding commands and reload behavior;
+- separate `ctrl-n` and `ctrl-a` binding commands and reload behavior;
 - explicit failure for repository-alias editing without repository identity.
 
 No branch field is needed for this feature; the existing worktree basename remains the session-specific suffix.

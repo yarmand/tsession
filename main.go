@@ -39,6 +39,8 @@ func main() {
 		err = cmd.RenameRepository(args)
 	case "remote":
 		err = cmd.Remote(args)
+	case "serve":
+		err = cmd.Serve(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -67,6 +69,7 @@ Usage:
   tsession rename-repo <session-id> [alias]   Rename a repository
   tsession vscode <session-id> Open session directory in VS Code
   tsession remote serve        Run the remote RPC daemon (used over SSH)
+  tsession serve [--addr] [--open]  Start the loopback web UI (browser terminal)
   tsession watch [--daemon]    Refresh ~/.tsession/cache.json every --interval (default 10s)
   tsession stop-watch          Stop a running watch process
   tsession -h                  Show this help`)

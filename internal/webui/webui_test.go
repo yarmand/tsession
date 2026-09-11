@@ -21,7 +21,7 @@ func TestHandleSessions_FiltersAndShapesPayload(t *testing.T) {
 
 	srv := NewServer(
 		func() ([]sessions.Session, error) { return all, nil },
-		func() (map[string]string, error) { return map[string]string{"github.com/org/repo": "myalias"}, nil },
+		WithAliases(func() (map[string]string, error) { return map[string]string{"github.com/org/repo": "myalias"}, nil }),
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
@@ -85,7 +85,6 @@ func TestHandleSessions_FiltersAndShapesPayload(t *testing.T) {
 func TestHandleSessions_ProviderErrorReturns500(t *testing.T) {
 	srv := NewServer(
 		func() ([]sessions.Session, error) { return nil, errors.New("boom") },
-		nil,
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
@@ -100,7 +99,7 @@ func TestHandleSessions_ProviderErrorReturns500(t *testing.T) {
 func TestHandleSessions_AliasesProviderErrorReturns500(t *testing.T) {
 	srv := NewServer(
 		func() ([]sessions.Session, error) { return nil, nil },
-		func() (map[string]string, error) { return nil, errors.New("boom") },
+		WithAliases(func() (map[string]string, error) { return nil, errors.New("boom") }),
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
@@ -116,7 +115,7 @@ func TestHandleSessions_NilAliasesProviderDefaultsToNoAliases(t *testing.T) {
 	all := []sessions.Session{
 		{ID: "s1", Repository: "git@github.com:org/repo.git", TmuxName: "p", TmuxTarget: "p:0.0", State: sessions.StateActiveIdle},
 	}
-	srv := NewServer(func() ([]sessions.Session, error) { return all, nil }, nil)
+	srv := NewServer(func() ([]sessions.Session, error) { return all, nil })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	rec := httptest.NewRecorder()
@@ -135,7 +134,7 @@ func TestHandleSessions_NilAliasesProviderDefaultsToNoAliases(t *testing.T) {
 }
 
 func TestHandleSessions_EmptyListReturnsEmptyArray(t *testing.T) {
-	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil }, nil)
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	rec := httptest.NewRecorder()

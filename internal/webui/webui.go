@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/webterm"
 )
 
 // SessionsProvider returns the current merged (local + remote) session
@@ -26,6 +28,11 @@ type SessionsProvider func() ([]sessions.Session, error)
 // AliasesProvider returns the repository alias map (see internal/reponames)
 // used to label sessions the same way `--short` rendering does.
 type AliasesProvider func() (map[string]string, error)
+
+// RemoteResolver resolves a session's Origin to its configured
+// config.Remote. ok is false when origin does not match any configured
+// remote.
+type RemoteResolver func(origin string) (r config.Remote, ok bool, err error)
 
 // defaultNotifyStorePath returns ~/.tsession/notify-web.json, the web UI's
 // own notification snapshot — kept separate from the desktop path's
@@ -43,25 +50,52 @@ func defaultNotifyStorePath() string {
 type Server struct {
 	sessionsFn SessionsProvider
 	aliasesFn  AliasesProvider
+	remoteFn   RemoteResolver
+	registry   *webterm.Registry
 	now        func() time.Time
 
 	notifyStorePath string
 	pollInterval    time.Duration
 }
 
-// NewServer builds a Server. aliasesFn may be nil, in which case repository
-// aliasing is disabled (labels fall back to the plain origin short name).
-func NewServer(sessionsFn SessionsProvider, aliasesFn AliasesProvider) *Server {
-	if aliasesFn == nil {
-		aliasesFn = func() (map[string]string, error) { return nil, nil }
-	}
-	return &Server{
+// Option configures optional Server dependencies not every caller needs
+// (e.g. httptest-based unit tests of /api/sessions have no use for a
+// terminal registry). See WithAliases, WithRemotes, and WithTerminal.
+type Option func(*Server)
+
+// WithAliases enables alias-aware repository labels (see internal/reponames)
+// in /api/sessions. Without it, labels fall back to the plain origin short
+// name.
+func WithAliases(fn AliasesProvider) Option {
+	return func(s *Server) { s.aliasesFn = fn }
+}
+
+// WithRemotes enables GET /api/terminal for remote sessions by letting the
+// handler resolve a session's Origin to its config.Remote. Without it,
+// terminal requests for remote sessions fail.
+func WithRemotes(fn RemoteResolver) Option {
+	return func(s *Server) { s.remoteFn = fn }
+}
+
+// WithTerminal enables GET /api/terminal/{origin}/{id}, backed by registry.
+// Without it, the route responds 501 Not Implemented.
+func WithTerminal(registry *webterm.Registry) Option {
+	return func(s *Server) { s.registry = registry }
+}
+
+// NewServer builds a Server from a SessionsProvider and optional Options.
+func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
+	s := &Server{
 		sessionsFn:      sessionsFn,
-		aliasesFn:       aliasesFn,
+		aliasesFn:       func() (map[string]string, error) { return nil, nil },
 		now:             time.Now,
 		notifyStorePath: defaultNotifyStorePath(),
 		pollInterval:    3 * time.Second,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // SetNotifyStorePath overrides the path GET /api/events reads/writes its
@@ -83,6 +117,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/name", s.handleRenameSession)
 	mux.HandleFunc("POST /api/repos/alias", s.handleRepoAlias)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	mux.HandleFunc("GET /api/terminal/{origin}/{id}", s.handleTerminal)
 	return mux
 }
 

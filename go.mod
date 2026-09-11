@@ -3,6 +3,7 @@ module github.com/yarma/tsession
 go 1.25.6
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	modernc.org/sqlite v1.50.1
 )

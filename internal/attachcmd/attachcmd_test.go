@@ -291,3 +291,66 @@ func TestSplitWindowPane(t *testing.T) {
 func shQ(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
+
+func TestBuildKill_LocalWithTarget(t *testing.T) {
+	s := sessions.Session{ID: "sess1", TmuxTarget: "proj:0.0"}
+	bin, args, ok, err := BuildKill(s, config.Remote{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for a local session with a tmux target")
+	}
+	if bin != "sh" || len(args) != 2 {
+		t.Fatalf("unexpected shape: bin=%q args=%v", bin, args)
+	}
+	web := WebSessionName("", "sess1")
+	if !strings.Contains(args[1], "tmux kill-session -t "+shQ(web)) {
+		t.Fatalf("expected kill-session script, got %q", args[1])
+	}
+}
+
+func TestBuildKill_LocalNoTarget(t *testing.T) {
+	s := sessions.Session{ID: "sess2"}
+	_, args, ok, err := BuildKill(s, config.Remote{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true: local no-target sessions still create a web tmux session")
+	}
+	if !strings.Contains(args[1], "tmux kill-session") {
+		t.Fatalf("expected kill-session script, got %q", args[1])
+	}
+}
+
+func TestBuildKill_RemoteNoTmuxAtAll_NotOK(t *testing.T) {
+	s := sessions.Session{ID: "r1", Origin: "host1", RemoteTmuxAvailable: false}
+	r := config.Remote{Name: "host1", Type: "ssh", Host: "host1.example.com"}
+	_, _, ok, err := BuildKill(s, r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected ok=false: nothing to kill when the remote has no tmux at all")
+	}
+}
+
+func TestBuildKill_RemoteWithTmux(t *testing.T) {
+	s := sessions.Session{ID: "r2", Origin: "host1", RemoteTmuxAvailable: true, RemoteTmuxTarget: "w:0.0"}
+	r := config.Remote{Name: "host1", Type: "ssh", Host: "host1.example.com"}
+	bin, args, ok, err := BuildKill(s, r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if bin != "ssh" {
+		t.Fatalf("expected ssh, got %q", bin)
+	}
+	last := args[len(args)-1]
+	if !strings.Contains(last, "tmux kill-session") {
+		t.Fatalf("expected kill-session in wrapped script, got %q", last)
+	}
+}

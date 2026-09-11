@@ -45,7 +45,30 @@ func Build(s sessions.Session, r config.Remote) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	return wrapInTransport(s, r, script)
+}
 
+// BuildKill returns the binary and arguments to execute in order to tear
+// down the tmux session Build attached to for s, wrapped in the same
+// transport. ok is false when Build's script for s never created a tmux
+// session in the first place (the remote-has-no-tmux-at-all case), meaning
+// there is nothing to kill — callers should treat that as a no-op rather
+// than an error.
+func BuildKill(s sessions.Session, r config.Remote) (bin string, args []string, ok bool, err error) {
+	if s.Origin != "" && !s.RemoteTmuxAvailable {
+		return "", nil, false, nil
+	}
+	web := WebSessionName(s.Origin, s.ID)
+	script := "tmux kill-session -t " + shellutil.Quote(web)
+	bin, args, err = wrapInTransport(s, r, script)
+	return bin, args, true, err
+}
+
+// wrapInTransport wraps script for execution: run directly for a local
+// session, or through r's interactive transport for a remote one. See
+// Build's doc comment for the ssh/codespace-vs-devcontainer quoting
+// distinction this preserves.
+func wrapInTransport(s sessions.Session, r config.Remote, script string) (string, []string, error) {
 	if s.Origin == "" {
 		return "sh", []string{"-c", script}, nil
 	}

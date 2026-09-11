@@ -24,7 +24,7 @@ func stubTmuxRenameSession(fn func(oldName, newName string) error) (restore func
 
 func TestHandleRenameSession_SetsAndClearsName(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil }, nil)
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/sess1/name", strings.NewReader(`{"name":"my session"}`))
 	rec := httptest.NewRecorder()
@@ -53,7 +53,7 @@ func TestHandleRenameSession_RenamesLiveTmuxSession(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	all := []sessions.Session{{ID: "sess2", TmuxName: "orig-tmux-name"}}
-	srv := NewServer(func() ([]sessions.Session, error) { return all, nil }, nil)
+	srv := NewServer(func() ([]sessions.Session, error) { return all, nil })
 
 	var renamedOld, renamedNew string
 	restore := stubTmuxRenameSession(func(oldName, newName string) error {
@@ -76,7 +76,7 @@ func TestHandleRenameSession_RenamesLiveTmuxSession(t *testing.T) {
 
 func TestHandleRenameSession_InvalidJSON(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil }, nil)
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/sess1/name", strings.NewReader(`not json`))
 	rec := httptest.NewRecorder()
@@ -89,7 +89,7 @@ func TestHandleRenameSession_InvalidJSON(t *testing.T) {
 
 func TestHandleRepoAlias_SetsAndClearsAlias(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil }, nil)
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 
 	body, _ := json.Marshal(repoAliasRequest{Repository: "git@github.com:org/repo.git", Alias: "shortname"})
 	req := httptest.NewRequest(http.MethodPost, "/api/repos/alias", bytes.NewReader(body))
@@ -110,7 +110,7 @@ func TestHandleRepoAlias_SetsAndClearsAlias(t *testing.T) {
 
 func TestHandleRepoAlias_RequiresRepository(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil }, nil)
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 
 	body, _ := json.Marshal(repoAliasRequest{Alias: "shortname"})
 	req := httptest.NewRequest(http.MethodPost, "/api/repos/alias", bytes.NewReader(body))
@@ -131,7 +131,7 @@ func TestHandleEvents_StreamsNotifyTransition(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		return []sessions.Session{{ID: "s1", Name: "s1", State: state}}, nil
-	}, nil)
+	})
 	srv.SetNotifyStorePath(dir + "/notify-web.json")
 	srv.SetPollInterval(5 * time.Millisecond)
 
@@ -172,7 +172,7 @@ func TestHandleEvents_NoTransitionsProducesNoFrames(t *testing.T) {
 	dir := t.TempDir()
 	srv := NewServer(func() ([]sessions.Session, error) {
 		return []sessions.Session{{ID: "s1", State: sessions.StateWorking}}, nil
-	}, nil)
+	})
 	srv.SetNotifyStorePath(dir + "/notify-web.json")
 	srv.SetPollInterval(5 * time.Millisecond)
 

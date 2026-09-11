@@ -10,6 +10,8 @@ package webui
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/yarma/tsession/internal/render"
@@ -25,11 +27,26 @@ type SessionsProvider func() ([]sessions.Session, error)
 // used to label sessions the same way `--short` rendering does.
 type AliasesProvider func() (map[string]string, error)
 
+// defaultNotifyStorePath returns ~/.tsession/notify-web.json, the web UI's
+// own notification snapshot — kept separate from the desktop path's
+// ~/.tsession/notify.json so the two observers never race over the same
+// lock/snapshot (see internal/notify.DiffWithStore's doc comment).
+func defaultNotifyStorePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".tsession", "notify-web.json")
+}
+
 // Server holds the dependencies for the web UI's HTTP handlers.
 type Server struct {
 	sessionsFn SessionsProvider
 	aliasesFn  AliasesProvider
 	now        func() time.Time
+
+	notifyStorePath string
+	pollInterval    time.Duration
 }
 
 // NewServer builds a Server. aliasesFn may be nil, in which case repository
@@ -38,8 +55,24 @@ func NewServer(sessionsFn SessionsProvider, aliasesFn AliasesProvider) *Server {
 	if aliasesFn == nil {
 		aliasesFn = func() (map[string]string, error) { return nil, nil }
 	}
-	return &Server{sessionsFn: sessionsFn, aliasesFn: aliasesFn, now: time.Now}
+	return &Server{
+		sessionsFn:      sessionsFn,
+		aliasesFn:       aliasesFn,
+		now:             time.Now,
+		notifyStorePath: defaultNotifyStorePath(),
+		pollInterval:    3 * time.Second,
+	}
 }
+
+// SetNotifyStorePath overrides the path GET /api/events reads/writes its
+// notification snapshot at. Tests use this to avoid touching the real
+// ~/.tsession directory; production callers can leave the default.
+func (s *Server) SetNotifyStorePath(path string) { s.notifyStorePath = path }
+
+// SetPollInterval overrides how often GET /api/events re-checks the session
+// list for done/question transitions. Tests use a short interval to avoid
+// slow test runs; production callers can leave the 3s default.
+func (s *Server) SetPollInterval(d time.Duration) { s.pollInterval = d }
 
 // Handler returns an http.Handler serving this Server's API routes, mounted
 // at their final paths (e.g. "/api/sessions"). Callers combine it with
@@ -47,6 +80,9 @@ func NewServer(sessionsFn SessionsProvider, aliasesFn AliasesProvider) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
+	mux.HandleFunc("POST /api/sessions/{id}/name", s.handleRenameSession)
+	mux.HandleFunc("POST /api/repos/alias", s.handleRepoAlias)
+	mux.HandleFunc("GET /api/events", s.handleEvents)
 	return mux
 }
 

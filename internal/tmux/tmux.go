@@ -82,6 +82,45 @@ func parseListSessions(s string) []Session {
 	return out
 }
 
+// ListWebSessionNames returns the names of local tmux sessions created by
+// `tsession serve` (see WebSessionPrefix). Unlike ListSessions, this is the
+// one place in the package that surfaces these synthetic sessions rather
+// than filtering them out — used by internal/webterm's startup reaper to
+// clean up sessions orphaned by a crashed or killed server.
+func ListWebSessionNames() ([]string, error) {
+	out, err := listTmuxOutput("list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		if noTmuxServer(out, err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && isWebSession(line) {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
+// KillSession kills the named tmux session. It is a no-op (returns nil) if
+// no tmux server is running or the session does not exist.
+func KillSession(name string) error {
+	out, err := listTmuxOutput("kill-session", "-t", name)
+	if err != nil {
+		if noTmuxServer(out, err) {
+			return nil
+		}
+		if strings.Contains(string(out), "session not found") {
+			return nil
+		}
+		return fmt.Errorf("tmux kill-session -t %s: %w: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 func SwitchClient(name string) error {
 	return SwitchClientTarget(name, "")
 }

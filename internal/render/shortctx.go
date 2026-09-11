@@ -60,6 +60,27 @@ func BuildShortContextWithAliases(all []sessions.Session, aliases map[string]str
 // LegendField returns a single-line legend suitable for embedding as an fzf field.
 func (c ShortContext) LegendField() string { return c.legendField }
 
+// RepositoryLabel returns the alias-aware repository label for s (empty
+// string if s.Repository has no entry in this context, e.g. because it's
+// empty). It is the same label FormatLineShortWithContext embeds in the
+// bracketed repository column, exposed for consumers (e.g. the web UI's
+// JSON API) that render it themselves rather than through the fixed-width
+// terminal layout.
+func (c ShortContext) RepositoryLabel(s sessions.Session) string {
+	display, ok := c.repositoryDisplayFor(s.Repository)
+	if !ok {
+		return ""
+	}
+	return display.label
+}
+
+// WorktreeName returns the session's display name derived from its working
+// directory (falling back to its custom Name, then its repository) — the
+// same value FormatLineShortWithContext shows next to the repository label.
+func WorktreeName(s sessions.Session) string {
+	return shortWorktreeName(s)
+}
+
 func (c ShortContext) repositoryDisplayFor(origin string) (shortRepositoryDisplay, bool) {
 	key := originKey(origin)
 	if key == "" || c.repositoryDisplay == nil {

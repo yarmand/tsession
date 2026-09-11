@@ -273,23 +273,10 @@ func filterOrigin(in []sessions.Session, origin string) []sessions.Session {
 	return out
 }
 
-// filterActive keeps only sessions that are attached to a tmux session and
-// whose state is something other than exited/unknown — i.e. sessions a user
-// can resume right now and that have meaningful liveness signal.
-// For remote sessions (Origin != ""), tmux attachment is not required since
-// the remote tmux server may not be accessible via SSH.
+// filterActive delegates to sessions.FilterActive; kept as a thin wrapper so
+// existing call sites in this package are unchanged.
 func filterActive(in []sessions.Session) []sessions.Session {
-	out := in[:0:0]
-	for _, s := range in {
-		if s.Origin == "" && s.TmuxName == "" {
-			continue
-		}
-		if s.State == sessions.StateExited || s.State == sessions.StateUnknown || s.State == sessions.StateInactiveIdle {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
+	return sessions.FilterActive(in)
 }
 
 // resolveRemotePanes matches remote sessions to local tmux panes that are

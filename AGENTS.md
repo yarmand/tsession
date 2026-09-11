@@ -110,6 +110,7 @@ tsession rename-repo <session-id> [alias]    # rename a repository
 tsession vscode <session-id>                 # open session directory in VS Code
 tsession watch [--daemon]                    # refresh cache every --interval (default 10s)
 tsession stop-watch                          # stop a running watch process
+tsession serve [--addr] [--open]             # loopback web UI: session list + browser terminal
 ```
 
 ## New Sessions (`new`)
@@ -154,3 +155,49 @@ Sessions can be given custom display names via `ctrl-n` in the picker or `tsessi
 Repositories can be given shared short aliases via `ctrl-a` in the picker or `tsession rename-repo <id> [alias]`. Aliases are stored in `~/.tsession/repo-names.json` and are used in `--short` rendering.
 
 When a session has a corresponding tmux session, renaming also renames the tmux session. To clear a name, rename with an empty string.
+
+## Web UI (`serve`)
+
+`tsession serve` is a loopback-only HTTP server (`internal/webui`) providing a
+browser-based alternative to the tmux-split workflow, primarily to avoid
+tmux-in-tmux nesting when resuming remote sessions. Full design:
+`docs/superpowers/specs/2026-09-11-web-session-ui-design.md`.
+
+**Packages:**
+
+| Package | Responsibility |
+|---|---|
+| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`) or a `*webterm.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`) on `NewServer`. |
+| `internal/webterm` | Generic PTY registry keyed by `(origin, sessionID)`. Owns the `creack/pty` file, child process, a 256KB output ring buffer (replayed on reconnect), and fan-out to subscribed WebSocket clients. Knows nothing about tmux or SSH. |
+| `internal/attachcmd` | The only place that knows how to build the command `webterm` runs: grouped-tmux-attach scripts, remote-transport wrapping (via `config.Remote.ResumeCommand()`), and `BuildKill` for teardown (`tmux kill-session`). |
+| `internal/webui/static` | `go:embed`ed frontend: `index.html`, `app.js`, `app.css`, plus vendored `xterm.js`/`xterm.css`/the fit addon under `vendor/` (MIT-licensed, no Node build step, no CDN dependency at runtime). |
+
+**Attach model:** local sessions attach through a **grouped tmux session**
+(`tmux new-session -t <original>`, name `tsession-web-<sha256(origin+id)[:12]>`)
+so the browser gets independent sizing without resizing or stealing any split
+already attached to that session. Remote sessions run the identical script
+through the same SSH/`gh codespace ssh`/`docker exec` transport already used by
+`ensureRemoteBridge`. PTYs stay warm across tab closes; teardown
+(`tmux kill-session` over the same transport) only runs on explicit close or
+server shutdown (`Registry.Shutdown`), never on a WebSocket disconnect (which
+only unsubscribes).
+
+**Grouped-session filtering:** because a grouped session's panes share the
+original's pane PIDs, `tmux list-panes -a` reports the same PID under both
+session names. `internal/tmux` filters out `tsession-web-*` before any
+PID-based `TmuxTarget` resolution, and startup reaps orphaned local
+`tsession-web-*` sessions from a prior crash (`webterm.ReapOrphanedLocal`).
+
+**Notifications:** the web path reuses `internal/notify`'s diff logic
+(`notify.DiffWithStore`) against its own snapshot,
+`~/.tsession/notify-web.json`, independent of the desktop path's
+`~/.tsession/notify.json` — so `watch --daemon --notify` and a browser tab can
+observe the same done/question transitions concurrently without racing over
+one lock file. The browser renders its own `Notification`, not an `osascript`
+call.
+
+**Safety:** `--addr` must resolve to loopback (`127.0.0.1`/`127.0.0.0/8`,
+`::1`, or literal `localhost`); anything else is rejected before the listener
+binds. There is no auth, TLS, or non-loopback access in v1 — PTYs must never
+be reachable off-host.
+

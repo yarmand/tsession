@@ -259,7 +259,39 @@ are skipped with a warning without blocking the local cache update.
 - **Slow SSH:** Ensure `ControlMaster` is configured in `~/.ssh/config` for
   persistent connections. The gather script completes in <1s on most hosts.
 
-## Releases
+## Web UI — browser terminal (workaround for tmux-in-tmux over SSH)
+
+`tsession serve` starts a loopback-only web server with a two-panel UI: the
+session list on the left (mirroring `browse --watch --active --short`) and an
+xterm.js terminal on the right. Clicking a row attaches the terminal to that
+session's PTY.
+
+```bash
+tsession serve            # http://127.0.0.1:4270
+tsession serve --open     # also open the default browser
+```
+
+This exists to work around **tmux-in-tmux**: resuming a remote session today
+opens a local tmux pane that runs `ssh -t <host> tmux attach-session ...`,
+stacking two tmux servers in one terminal (broken prefix keys, doubled status
+bars, broken copy-mode). The web UI's browser tab acts as the outer terminal
+instead, so only one tmux server is ever in the path:
+
+- **Local sessions** attach through a grouped tmux session
+  (`tmux new-session -t <original>`), so the browser gets its own size without
+  resizing or stealing any split you already have attached to that session.
+- **Remote sessions** run the identical attach script over the same
+  transport already configured in `~/.config/tsession/config.yaml` (SSH,
+  `gh codespace ssh`, or `docker exec`) — no local bridge session is created.
+
+PTYs stay warm across tab closes and only tear down (`tmux kill-session`) on
+explicit close or server shutdown. `--addr` must be loopback (`127.0.0.1`,
+`::1`, or `localhost`); a non-loopback address is rejected before the server
+binds, since PTYs must never be reachable off-host. This is a parallel front
+end — the existing `browse`/`popup`/fzf workflow and `ensureRemoteBridge` path
+are unmodified.
+
+
 
 Push a version tag (`vX.Y.Z`) to trigger `.github/workflows/release.yml`.
 The workflow cross-compiles and publishes:

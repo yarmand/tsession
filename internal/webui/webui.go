@@ -118,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/repos/alias", s.handleRepoAlias)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/terminal/{origin}/{id}", s.handleTerminal)
+	mux.Handle("/", staticHandler())
 	return mux
 }
 
@@ -126,17 +127,18 @@ func (s *Server) Handler() http.Handler {
 // timestamps so the browser can compute and continuously update its own
 // "age" display rather than freezing the age at fetch time.
 type SessionView struct {
-	ID          string    `json:"id"`
-	Origin      string    `json:"origin"`
-	Source      string    `json:"source"`
-	State       string    `json:"state"`
-	Name        string    `json:"name"`
-	Repository  string    `json:"repository"`
-	CWD         string    `json:"cwd"`
-	Summary     string    `json:"summary"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	LastEventAt time.Time `json:"lastEventAt"`
-	HasTmux     bool      `json:"hasTmux"`
+	ID           string    `json:"id"`
+	Origin       string    `json:"origin"`
+	Source       string    `json:"source"`
+	State        string    `json:"state"`
+	Name         string    `json:"name"`
+	Repository   string    `json:"repository"`
+	RepositoryID string    `json:"repositoryId"`
+	CWD          string    `json:"cwd"`
+	Summary      string    `json:"summary"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	LastEventAt  time.Time `json:"lastEventAt"`
+	HasTmux      bool      `json:"hasTmux"`
 }
 
 // SessionsResponse is the top-level JSON payload of GET /api/sessions.
@@ -190,16 +192,17 @@ func sessionView(s sessions.Session, ctx render.ShortContext) SessionView {
 	hasTmux := s.Origin == "" && s.TmuxTarget != "" || s.Origin != "" && s.RemoteTmuxAvailable
 
 	return SessionView{
-		ID:          s.ID,
-		Origin:      s.Origin,
-		Source:      s.Source,
-		State:       s.State.String(),
-		Name:        s.Name,
-		Repository:  repo,
-		CWD:         s.CWD,
-		Summary:     s.Summary,
-		UpdatedAt:   s.UpdatedAt,
-		LastEventAt: s.LastEventAt,
-		HasTmux:     hasTmux,
+		ID:           s.ID,
+		Origin:       s.Origin,
+		Source:       s.Source,
+		State:        s.State.String(),
+		Name:         s.Name,
+		Repository:   repo,
+		RepositoryID: s.Repository,
+		CWD:          s.CWD,
+		Summary:      s.Summary,
+		UpdatedAt:    s.UpdatedAt,
+		LastEventAt:  s.LastEventAt,
+		HasTmux:      hasTmux,
 	}
 }

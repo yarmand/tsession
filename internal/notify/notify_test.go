@@ -190,6 +190,60 @@ func sess(id string, st sessions.State) sessions.Session {
 	return sessions.Session{ID: id, Name: id, State: st}
 }
 
+// TestProcessWithStore_IsolatedFromDefaultStore verifies the reason
+// ProcessWithStore exists: the web UI's browser-notification path must use
+// its own snapshot and lock so it cannot silently consume a transition that
+// the default (desktop-notification) path was about to report, or vice
+// versa. Two independent stores observing the same transition must each fire
+// once — not zero, not shared.
+func TestProcessWithStore_IsolatedFromDefaultStore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	calls := withCaptureFire(t)
+	webPath := filepath.Join(t.TempDir(), "notify-web.json")
+
+	// Establish prior sightings on both stores so the done transition below
+	// isn't the silent first-sighting case for either one.
+	_ = Process([]sessions.Session{sess("a", sessions.StateWorking)})
+	_ = ProcessWithStore([]sessions.Session{sess("a", sessions.StateWorking)}, webPath)
+
+	// Both observers see the same transition independently.
+	if err := Process([]sessions.Session{sess("a", sessions.StateDone)}); err != nil {
+		t.Fatalf("default store Process: %v", err)
+	}
+	if err := ProcessWithStore([]sessions.Session{sess("a", sessions.StateDone)}, webPath); err != nil {
+		t.Fatalf("web store ProcessWithStore: %v", err)
+	}
+
+	if len(*calls) != 2 {
+		t.Fatalf("independent stores must each fire once (2 total), got %d: %v", len(*calls), *calls)
+	}
+
+	// Re-running against either store alone must not refire — each store's
+	// own snapshot correctly recorded the transition.
+	if err := Process([]sessions.Session{sess("a", sessions.StateDone)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProcessWithStore([]sessions.Session{sess("a", sessions.StateDone)}, webPath); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("no-change re-run must not refire, got %d: %v", len(*calls), *calls)
+	}
+}
+
+// TestProcessWithStore_CreatesParentDir verifies the web store's directory
+// (which may not yet exist, e.g. before ~/.tsession/notify-web.json is ever
+// written) is created rather than failing.
+func TestProcessWithStore_CreatesParentDir(t *testing.T) {
+	snapPath := filepath.Join(t.TempDir(), "nested", "dir", "notify-web.json")
+	if err := ProcessWithStore([]sessions.Session{sess("a", sessions.StateDone)}, snapPath); err != nil {
+		t.Fatalf("ProcessWithStore: %v", err)
+	}
+	if _, err := os.Stat(snapPath); err != nil {
+		t.Fatalf("expected snapshot file to exist: %v", err)
+	}
+}
+
 func TestProcessFirstSightingDoesNotFire(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	calls := withCaptureFire(t)

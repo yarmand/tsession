@@ -10,6 +10,7 @@ import (
 
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/shellutil"
 	"github.com/yarma/tsession/internal/tmux"
 )
 
@@ -325,5 +326,5 @@ func resumeBindingCommand(self, target string) string {
 // shellQuote wraps s in single quotes, escaping any embedded single quotes,
 // so that it is safe to embed in shell commands executed by fzf bindings.
 func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return shellutil.Quote(s)
 }

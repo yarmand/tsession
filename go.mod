@@ -2,7 +2,11 @@ module github.com/yarma/tsession
 
 go 1.25.6
 
+require modernc.org/sqlite v1.50.1
+
 require (
+	github.com/coder/websocket v1.8.15 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -12,5 +16,4 @@ require (
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.50.1 // indirect
 )

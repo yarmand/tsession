@@ -20,6 +20,21 @@ func TestParseListSessions(t *testing.T) {
 	}
 }
 
+// TestParseListSessions_FiltersWebGroupedSessions guards against the hazard
+// found while designing `tsession serve`: a grouped tmux session created to
+// attach a browser terminal (see WebSessionPrefix) shares its pane PIDs with
+// the real session it groups onto. If such a session were not filtered out
+// here, downstream PID-keyed matching (ResolveTmuxByPIDWithTree) could pick
+// the synthetic web session's target instead of — or in addition to — the
+// real one.
+func TestParseListSessions_FiltersWebGroupedSessions(t *testing.T) {
+	out := "alpha|/Users/x/alpha\ntsession-web-abc123def456|/Users/x/alpha\n"
+	got := parseListSessions(out)
+	if len(got) != 1 || got[0].Name != "alpha" {
+		t.Fatalf("want only real session, got %+v", got)
+	}
+}
+
 func TestParseListSessions_EmptyAndBlankLines(t *testing.T) {
 	if got := parseListSessions(""); len(got) != 0 {
 		t.Errorf("want empty, got %+v", got)
@@ -66,6 +81,28 @@ func TestListPanesPropagatesUnexpectedCommandError(t *testing.T) {
 
 	if _, err := ListPanes(); err == nil {
 		t.Fatal("expected tmux list-panes error")
+	}
+}
+
+// TestParseListPanes_FiltersWebGroupedSessions and
+// TestParseListPanesWithTitle_FiltersWebGroupedSessions guard the same hazard
+// as TestParseListSessions_FiltersWebGroupedSessions above, but for the pane
+// listings that ResolveTmuxByPIDWithTree keys by PID. A grouped web session
+// reports the same pane PID as the real session it groups onto, so any
+// unfiltered pane must never reach downstream PID matching.
+func TestParseListPanes_FiltersWebGroupedSessions(t *testing.T) {
+	out := "alpha|0|0|400\ntsession-web-abc123def456|0|0|400\n"
+	got := parseListPanes(out)
+	if len(got) != 1 || got[0].SessionName != "alpha" {
+		t.Fatalf("want only real pane, got %+v", got)
+	}
+}
+
+func TestParseListPanesWithTitle_FiltersWebGroupedSessions(t *testing.T) {
+	out := "alpha|0|0|400|hello\ntsession-web-abc123def456|0|0|400|hello\n"
+	got := parseListPanesWithTitle(out)
+	if len(got) != 1 || got[0].SessionName != "alpha" {
+		t.Fatalf("want only real pane, got %+v", got)
 	}
 }
 

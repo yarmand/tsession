@@ -21,7 +21,6 @@ import (
 const (
 	dirName      = ".tsession"
 	snapshotFile = "notify.json"
-	lockFile     = "notify.lock"
 )
 
 // fireFunc is the platform notification sender. It is a package variable so
@@ -202,9 +201,25 @@ func Process(ss []sessions.Session) error {
 	if err != nil {
 		return err
 	}
-	snapPath := filepath.Join(d, snapshotFile)
+	return ProcessWithStore(ss, filepath.Join(d, snapshotFile))
+}
 
-	unlock, err := lock(filepath.Join(d, lockFile))
+// ProcessWithStore is Process, but reads/writes its snapshot at snapPath and
+// locks a sibling "<snapPath>.lock" file, instead of the package default
+// ~/.tsession/notify.json / notify.lock. This lets independent observers keep
+// fully separate state: the desktop notifier (watch --daemon --notify,
+// browse --watch --notify) and the web UI's browser-notification path each
+// need to see every done/question transition once, but they must not share a
+// lock or a snapshot — doing so would let one observer's read-modify-write
+// silently consume the transition the other was about to report, dropping a
+// notification on whichever side didn't win the race.
+func ProcessWithStore(ss []sessions.Session, snapPath string) error {
+	if err := os.MkdirAll(filepath.Dir(snapPath), 0o755); err != nil {
+		return err
+	}
+	lockPath := snapPath + ".lock"
+
+	unlock, err := lock(lockPath)
 	if err != nil {
 		return err
 	}

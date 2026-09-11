@@ -39,6 +39,15 @@ func ResolveTmuxByPIDWithTree(sess []Session, sd []StateDirInfo, panes []tmux.Pa
 
 	paneByPID := map[int]tmux.Pane{}
 	for _, p := range panes {
+		// Defense-in-depth: internal/tmux's pane listers already filter out
+		// tsession-web-* grouped sessions before returning, since they share
+		// pane PIDs with the real session they group onto. Skip them again
+		// here so a caller that forgot to filter (or a future listing path)
+		// can never let a synthetic web session's pane win this PID-keyed
+		// lookup over the real one.
+		if strings.HasPrefix(p.SessionName, tmux.WebSessionPrefix) {
+			continue
+		}
 		paneByPID[p.PID] = p
 	}
 

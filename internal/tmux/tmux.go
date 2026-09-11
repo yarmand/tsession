@@ -23,6 +23,20 @@ type Pane struct {
 	Title       string // terminal title (set by running app, e.g. copilot session summary)
 }
 
+// WebSessionPrefix is the prefix used for grouped tmux sessions created by
+// `tsession serve` to attach a browser terminal to an existing local session
+// without resizing it (see internal/attachcmd). Sessions and panes with this
+// prefix are synthetic — a grouped session shares its pane PIDs with the
+// original session, so any pane-PID-keyed matching (see
+// internal/sessions/tmuxmatch.go) must never treat them as an independent
+// session with its own identity. Every function in this package that returns
+// sessions or panes filters this prefix out before returning.
+const WebSessionPrefix = "tsession-web-"
+
+func isWebSession(name string) bool {
+	return strings.HasPrefix(name, WebSessionPrefix)
+}
+
 var listTmuxOutput = func(args ...string) ([]byte, error) {
 	return exec.Command("tmux", args...).CombinedOutput()
 }
@@ -58,6 +72,9 @@ func parseListSessions(s string) []Session {
 		}
 		parts := strings.SplitN(line, "|", 2)
 		if len(parts) != 2 {
+			continue
+		}
+		if isWebSession(parts[0]) {
 			continue
 		}
 		out = append(out, Session{Name: parts[0], Path: parts[1]})
@@ -209,6 +226,9 @@ func parseListPanesWithTitle(s string) []Pane {
 		if len(parts) < 4 {
 			continue
 		}
+		if isWebSession(parts[0]) {
+			continue
+		}
 		pid, err := strconv.Atoi(strings.TrimSpace(parts[3]))
 		if err != nil {
 			continue
@@ -236,6 +256,9 @@ func parseListPanes(s string) []Pane {
 		}
 		parts := strings.Split(line, "|")
 		if len(parts) != 4 {
+			continue
+		}
+		if isWebSession(parts[0]) {
 			continue
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(parts[3]))

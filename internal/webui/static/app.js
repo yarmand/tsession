@@ -12,6 +12,8 @@
     term: null,
     fitAddon: null,
     renameTarget: null, // { kind: "session"|"repo", id, currentName }
+    focusTarget: "list", // "list" | "terminal" — see the Focus management section below
+    listIndex: 0, // keyboard-navigation cursor row in state.sessions
   };
 
   const listEl = document.getElementById("session-list");
@@ -68,10 +70,13 @@
 
   function renderSessions() {
     listEl.innerHTML = "";
-    for (const s of state.sessions) {
+    state.sessions.forEach((s, i) => {
       const key = sessionKey(s);
       const li = document.createElement("li");
-      li.className = "session-row" + (key === state.selectedKey ? " selected" : "");
+      let cls = "session-row";
+      if (key === state.selectedKey) cls += " selected";
+      if (state.focusTarget === "list" && i === state.listIndex) cls += " cursor";
+      li.className = cls;
       li.dataset.key = key;
 
       const line1 = document.createElement("div");
@@ -104,7 +109,10 @@
       summary.textContent = s.summary || "";
       li.appendChild(summary);
 
-      li.addEventListener("click", () => selectSession(s));
+      li.addEventListener("click", () => {
+        state.listIndex = i;
+        selectSession(s);
+      });
       li.addEventListener("dblclick", () => openRenameModal("session", s.id, s.name || ""));
       repo.addEventListener("contextmenu", (ev) => {
         ev.preventDefault();
@@ -112,7 +120,7 @@
         openRenameModal("repo", s.repositoryId || s.repository, s.repository || "");
       });
       listEl.appendChild(li);
-    }
+    });
   }
 
   async function refreshSessions() {
@@ -121,6 +129,10 @@
       if (!resp.ok) return;
       const data = await resp.json();
       state.sessions = data.sessions || [];
+      if (state.listIndex == null) state.listIndex = 0;
+      if (state.listIndex >= state.sessions.length) {
+        state.listIndex = Math.max(0, state.sessions.length - 1);
+      }
       renderSessions();
     } catch (e) {
       // Transient fetch failures are expected during server restarts; the
@@ -144,11 +156,28 @@
     state.term.loadAddon(state.fitAddon);
     state.term.open(terminalEl);
     state.fitAddon.fit();
+
+    const encoder = new TextEncoder();
     state.term.onData((data) => {
       if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-        state.socket.send(data);
+        // WebSocket.send(string) always sends a TEXT frame, but the server
+        // only treats keystrokes as PTY input on BINARY frames (TEXT frames
+        // are parsed as JSON control messages, e.g. resize) — so keystrokes
+        // must be sent as bytes, not as a string.
+        state.socket.send(encoder.encode(data));
       }
     });
+
+    // xterm.js only routes keydown to the PTY when its own hidden textarea
+    // has real DOM focus. attachCustomKeyEventHandler runs before xterm's
+    // internal handling; stopping propagation here keeps page-level
+    // shortcuts (rename modal Escape, etc.) from also reacting to keys the
+    // user is sending to the terminal.
+    state.term.attachCustomKeyEventHandler((ev) => {
+      ev.stopPropagation();
+      return true; // let xterm handle it normally
+    });
+
     window.addEventListener("resize", () => {
       if (state.fitAddon) state.fitAddon.fit();
     });
@@ -172,6 +201,8 @@
   function selectSession(s) {
     state.selectedSession = s;
     state.selectedKey = sessionKey(s);
+    const idx = state.sessions.findIndex((x) => sessionKey(x) === state.selectedKey);
+    if (idx >= 0) state.listIndex = idx;
     renderSessions();
 
     emptyStateEl.classList.add("hidden");
@@ -194,6 +225,7 @@
 
     socket.addEventListener("open", () => {
       sendResize();
+      focusTerminal();
     });
     socket.addEventListener("message", (ev) => {
       if (typeof ev.data === "string") {
@@ -219,6 +251,106 @@
     const msg = JSON.stringify({ type: "resize", cols: state.term.cols, rows: state.term.rows });
     state.socket.send(msg);
   }
+
+  // --- Focus management: Cmd+/ (or Ctrl+/) toggles keyboard focus between
+  // the session list and the terminal. While the terminal has focus, all
+  // keystrokes go to the PTY; while the list has focus, arrow keys move a
+  // highlight and Enter attaches. Browser-overridable shortcuts (Cmd+F,
+  // Cmd+S, etc.) are suppressed while the terminal is focused so they reach
+  // tmux instead — a few shortcuts (Cmd+W/T/N/Q and similar) are reserved by
+  // the browser/OS itself and cannot be intercepted from JavaScript.
+
+  function focusTerminal() {
+    if (!state.term || !state.selectedSession) return;
+    state.focusTarget = "terminal";
+    state.term.focus();
+    updateFocusIndicator();
+  }
+
+  function focusList() {
+    state.focusTarget = "list";
+    if (state.term) state.term.blur();
+    if (state.listIndex == null) state.listIndex = 0;
+    updateFocusIndicator();
+    renderSessions();
+  }
+
+  function updateFocusIndicator() {
+    document.getElementById("sessions").classList.toggle("panel-focused", state.focusTarget === "list");
+    document.getElementById("terminal-pane").classList.toggle("panel-focused", state.focusTarget === "terminal");
+  }
+
+  function moveListCursor(delta) {
+    if (state.sessions.length === 0) return;
+    const cur = state.listIndex == null ? 0 : state.listIndex;
+    state.listIndex = Math.min(state.sessions.length - 1, Math.max(0, cur + delta));
+    renderSessions();
+    const row = listEl.children[state.listIndex];
+    if (row) row.scrollIntoView({ block: "nearest" });
+  }
+
+  function attachHighlighted() {
+    if (state.listIndex == null) return;
+    const s = state.sessions[state.listIndex];
+    if (s) selectSession(s);
+  }
+
+  const SUPPRESSABLE_KEYS = new Set([
+    "f", "s", "p", "g", "k", "l", "o", "d", "u", "j", "e", "h", "n", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+  ]);
+
+  document.addEventListener(
+    "keydown",
+    (ev) => {
+      const key = ev.key.toLowerCase();
+      const mod = ev.metaKey || ev.ctrlKey;
+
+      // Cmd+/ (or Ctrl+/) toggles focus regardless of which panel is
+      // currently focused.
+      if (mod && key === "/") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (state.focusTarget === "terminal") focusList();
+        else focusTerminal();
+        return;
+      }
+
+      if (state.focusTarget === "terminal") {
+        // Never intercept plain (unmodified) keys or Cmd/Ctrl+C/V/A/X so
+        // native copy/paste/select-all keep working; suppress the rest of
+        // the common browser shortcuts so they reach tmux instead. Keys the
+        // browser/OS reserves for itself (Cmd+W, Cmd+T, Cmd+N, Cmd+Q, ...)
+        // cannot be suppressed by any web page.
+        if (mod && SUPPRESSABLE_KEYS.has(key)) {
+          ev.preventDefault();
+        }
+        return;
+      }
+
+      if (state.focusTarget === "list") {
+        switch (ev.key) {
+          case "ArrowDown":
+            ev.preventDefault();
+            moveListCursor(1);
+            return;
+          case "ArrowUp":
+            ev.preventDefault();
+            moveListCursor(-1);
+            return;
+          case "Enter":
+            ev.preventDefault();
+            attachHighlighted();
+            return;
+        }
+      }
+    },
+    true
+  );
+
+  terminalEl.addEventListener("click", focusTerminal);
+  document.getElementById("sessions").addEventListener("click", () => {
+    if (state.focusTarget !== "list") focusList();
+  });
 
   // --- Rename modal (sessions and repository aliases) ---
 
@@ -318,4 +450,5 @@
   refreshSessions();
   setInterval(refreshSessions, REFRESH_INTERVAL_MS);
   connectEvents();
+  updateFocusIndicator();
 })();

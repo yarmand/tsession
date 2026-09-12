@@ -185,13 +185,13 @@
     state.term = new Terminal({
       convertEol: true,
       cursorBlink: true,
-      fontSize: 13,
+      fontSize: 13.5,
       // Courier New (xterm.js's default fallback) renders noticeably
-      // jagged at small sizes on macOS. Menlo/SF Mono/Monaco are the
-      // system's well-hinted monospace fonts and render much more
-      // smoothly; Consolas/Liberation Mono cover Windows/Linux.
+      // jagged at small sizes on macOS. SF Mono is the system's well-hinted
+      // monospace font; Menlo/Monaco/Consolas/Liberation Mono are fallbacks
+      // for platforms where SF Mono isn't installed.
       fontFamily:
-        "Menlo, Monaco, 'SF Mono', Consolas, 'Liberation Mono', monospace",
+        "'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
       theme: { background: "#000000" },
     });
     state.fitAddon = new FitAddon.FitAddon();

@@ -291,7 +291,19 @@ binds, since PTYs must never be reachable off-host. This is a parallel front
 end — the existing `browse`/`popup`/fzf workflow and `ensureRemoteBridge` path
 are unmodified.
 
-### Installable as an app (PWA)
+### Three ways to use it
+
+| | How | Window | Extra install |
+|---|---|---|---|
+| **Browser tab** | `tsession serve --open` (or open the printed URL manually) | Regular browser tab, browser chrome and shortcuts included | None — just the `tsession` binary |
+| **Installed PWA** | Install once from the browser (see below), then launch like any app | Its own window, no browser chrome | One-time browser "Install" step; still served by `tsession serve` |
+| **Native GUI (`tsession gui`)** | `tsession gui` | Native OS window (Wails), no browser at all | A separately built/installed native app that `tsession gui` locates and launches |
+
+All three are front ends for the exact same embedded server and UI — the
+session-list panel, xterm.js terminal, PTY attach logic, and keyboard
+handling are identical regardless of which one you use.
+
+#### Installable as an app (PWA)
 
 The UI is an installable web app: Chrome/Edge show an install prompt (or
 "Install tsession..." in the browser menu), and Safari supports "Add to
@@ -302,6 +314,20 @@ separate install step or extra files on disk. The service worker only
 caches the static shell (HTML/CSS/JS/vendor/icons) for a fast reload; the
 session list, SSE notifications, and the terminal's WebSocket always go to
 the network untouched.
+
+#### Native GUI (`tsession gui`)
+
+> Design stage — see
+> `docs/superpowers/specs/2026-09-11-native-gui-design.md`; not yet
+> implemented.
+
+`tsession gui` will launch a separately built native application (Wails,
+covering macOS/Windows/Linux) that embeds the same `tsession serve` server
+internally and opens a plain OS window pointed at it — no browser required
+at all, and no separate `tsession serve` process to manage. The `tsession`
+CLI's `gui` subcommand only locates and launches the installed app; the app
+itself is built via a separate `wails build` pipeline documented in the
+design spec.
 
 
 

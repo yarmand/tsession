@@ -144,18 +144,65 @@
     return location.protocol === "https:" ? "wss:" : "ws:";
   }
 
+  // Maps a KeyboardEvent's physical `code` to the base character it would
+  // produce on a standard US keyboard layout, independent of modifier keys.
+  // Used to build Alt/Option-chord escape sequences ourselves (see
+  // altEscapeSequence) because macOS composes Option+key into a special
+  // unicode character (e.g. Alt+, -> "≤") at the OS level before the
+  // browser ever sees a plain keystroke — `event.key` reports the composed
+  // character, but `event.code` still reliably identifies the physical key
+  // regardless of what Option composed, so we reconstruct the intended
+  // character from `code` instead of trusting `key`.
+  const CODE_TO_BASE_CHAR = {
+    Backquote: ["`", "~"], Minus: ["-", "_"], Equal: ["=", "+"],
+    BracketLeft: ["[", "{"], BracketRight: ["]", "}"], Backslash: ["\\", "|"],
+    Semicolon: [";", ":"], Quote: ["'", '"'], Comma: [",", "<"],
+    Period: [".", ">"], Slash: ["/", "?"], Space: [" ", " "],
+    Digit0: ["0", ")"], Digit1: ["1", "!"], Digit2: ["2", "@"], Digit3: ["3", "#"],
+    Digit4: ["4", "$"], Digit5: ["5", "%"], Digit6: ["6", "^"], Digit7: ["7", "&"],
+    Digit8: ["8", "*"], Digit9: ["9", "("],
+  };
+
+  // altEscapeSequence returns the ESC-prefixed byte sequence a real terminal
+  // would send for an Option/Alt-chord keydown (e.g. Alt+, -> "\x1b,"), or
+  // null if ev isn't a chord this function knows how to translate.
+  function altEscapeSequence(ev) {
+    if (!ev.altKey || ev.ctrlKey || ev.metaKey) return null;
+    let base = null;
+    if (/^Key[A-Z]$/.test(ev.code)) {
+      const letter = ev.code.slice(3).toLowerCase();
+      base = ev.shiftKey ? letter.toUpperCase() : letter;
+    } else {
+      const pair = CODE_TO_BASE_CHAR[ev.code];
+      if (pair) base = ev.shiftKey ? pair[1] : pair[0];
+    }
+    if (base === null) return null;
+    return "\x1b" + base;
+  }
+
   function ensureTerminal() {
     if (state.term) return;
     state.term = new Terminal({
       convertEol: true,
       cursorBlink: true,
       fontSize: 13,
+      // Courier New (xterm.js's default fallback) renders noticeably
+      // jagged at small sizes on macOS. Menlo/SF Mono/Monaco are the
+      // system's well-hinted monospace fonts and render much more
+      // smoothly; Consolas/Liberation Mono cover Windows/Linux.
+      fontFamily:
+        "Menlo, Monaco, 'SF Mono', Consolas, 'Liberation Mono', monospace",
       theme: { background: "#000000" },
     });
     state.fitAddon = new FitAddon.FitAddon();
     state.term.loadAddon(state.fitAddon);
     state.term.open(terminalEl);
-    state.fitAddon.fit();
+    // Deferring the initial fit to the next frame ensures the container has
+    // already been laid out (it was just unhidden by selectSession), so the
+    // canvas backing store is sized against the real devicePixelRatio
+    // instead of a stale/zero layout, which otherwise shows up as blurry
+    // upscaled text.
+    requestAnimationFrame(() => state.fitAddon.fit());
 
     const encoder = new TextEncoder();
     state.term.onData((data) => {
@@ -174,10 +221,32 @@
     // shortcuts (rename modal Escape, etc.) from also reacting to keys the
     // user is sending to the terminal.
     state.term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type === "keydown") {
+        const seq = altEscapeSequence(ev);
+        if (seq !== null) {
+          // Send the escape sequence ourselves and prevent the browser's
+          // default action, which is what would otherwise insert macOS's
+          // composed special character (e.g. "≤" for Alt+,) — xterm.js's
+          // own macOptionIsMeta handling only inspects the already-composed
+          // `event.key`/`keyCode`, so it can't reliably recover the
+          // original key for punctuation. Returning false tells xterm not
+          // to process this event any further itself.
+          ev.preventDefault();
+          if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+            state.socket.send(encoder.encode(seq));
+          }
+          ev.stopPropagation();
+          return false;
+        }
+      }
       ev.stopPropagation();
       return true; // let xterm handle it normally
     });
 
+    const resizeObserver = new ResizeObserver(() => {
+      if (state.fitAddon) state.fitAddon.fit();
+    });
+    resizeObserver.observe(terminalEl);
     window.addEventListener("resize", () => {
       if (state.fitAddon) state.fitAddon.fit();
     });

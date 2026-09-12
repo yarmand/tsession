@@ -515,7 +515,23 @@
     };
   }
 
+  function registerServiceWorker() {
+    // Registering a service worker is what makes Chrome/Edge consider this
+    // app installable; see sw.js's header comment for what it actually
+    // does (cache-first for the static shell only, network passthrough for
+    // everything else). Safari doesn't require this for "Add to Dock", so
+    // this is skipped harmlessly there if unsupported.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {
+        // Installability is a nice-to-have, not a hard requirement — a
+        // failed registration (e.g. served over a scheme that disallows
+        // service workers) shouldn't block the rest of the app.
+      });
+    }
+  }
+
   requestNotificationPermission();
+  registerServiceWorker();
   refreshSessions();
   setInterval(refreshSessions, REFRESH_INTERVAL_MS);
   connectEvents();

@@ -291,6 +291,18 @@ binds, since PTYs must never be reachable off-host. This is a parallel front
 end — the existing `browse`/`popup`/fzf workflow and `ensureRemoteBridge` path
 are unmodified.
 
+### Installable as an app (PWA)
+
+The UI is an installable web app: Chrome/Edge show an install prompt (or
+"Install tsession..." in the browser menu), and Safari supports "Add to
+Dock". Installing opens it in its own window with no browser chrome — a
+`manifest.json`, icon set, and a minimal service worker (`static/sw.js`) are
+embedded in the binary alongside the rest of the frontend, so this needs no
+separate install step or extra files on disk. The service worker only
+caches the static shell (HTML/CSS/JS/vendor/icons) for a fast reload; the
+session list, SSE notifications, and the terminal's WebSocket always go to
+the network untouched.
+
 
 
 Push a version tag (`vX.Y.Z`) to trigger `.github/workflows/release.yml`.

@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/yarma/tsession/internal/config"
 )
@@ -74,5 +77,31 @@ func TestRemoteResolverFromConfig_LoadError(t *testing.T) {
 	_, _, err := remoteResolverFromConfig("host1")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected wrapped %v, got %v", wantErr, err)
+	}
+}
+
+func TestBuildEmbeddedServerReturnsWorkingHandlerAndRegistry(t *testing.T) {
+	srv, registry, err := BuildEmbeddedServer(14 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("BuildEmbeddedServer: %v", err)
+	}
+	if srv == nil {
+		t.Fatal("expected non-nil *webui.Server")
+	}
+	if registry == nil {
+		t.Fatal("expected non-nil *webterm.Registry")
+	}
+	defer registry.Shutdown()
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/sessions")
+	if err != nil {
+		t.Fatalf("GET /api/sessions: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/sessions status = %d, want 200", resp.StatusCode)
 	}
 }

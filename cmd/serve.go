@@ -41,18 +41,10 @@ func Serve(args []string) error {
 		return err
 	}
 
-	if err := webterm.ReapOrphanedLocal(); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: failed to reap orphaned web sessions:", err)
+	srv, registry, err := BuildEmbeddedServer(*maxAge)
+	if err != nil {
+		return err
 	}
-
-	registry := webterm.NewRegistry()
-
-	srv := webui.NewServer(
-		func() ([]sessions.Session, error) { return mergedSessionsForServe(*maxAge) },
-		webui.WithAliases(reponames.Load),
-		webui.WithRemotes(remoteResolverFromConfig),
-		webui.WithTerminal(registry),
-	)
 
 	listener, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -95,6 +87,29 @@ func Serve(args []string) error {
 		return shutdownErr
 	}
 	return teardownErr
+}
+
+// BuildEmbeddedServer wires up the same session-loading, alias-loading,
+// remote-resolving, and PTY-registry configuration used by `tsession
+// serve`. It is exported so the native GUI app (see gui/) can embed the
+// identical web UI server without duplicating this wiring. Callers own the
+// returned registry and must call registry.Shutdown() when done (this also
+// tears down every warm PTY).
+func BuildEmbeddedServer(maxAge time.Duration) (*webui.Server, *webterm.Registry, error) {
+	if err := webterm.ReapOrphanedLocal(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: failed to reap orphaned web sessions:", err)
+	}
+
+	registry := webterm.NewRegistry()
+
+	srv := webui.NewServer(
+		func() ([]sessions.Session, error) { return mergedSessionsForServe(maxAge) },
+		webui.WithAliases(reponames.Load),
+		webui.WithRemotes(remoteResolverFromConfig),
+		webui.WithTerminal(registry),
+	)
+
+	return srv, registry, nil
 }
 
 // requireLoopback rejects any --addr that is not explicitly loopback. PTYs

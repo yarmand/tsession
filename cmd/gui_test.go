@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -88,4 +89,29 @@ func contains(haystack, needle string) bool {
 		}
 		return false
 	})()
+}
+
+func TestGUILaunchCommandUsesOpenForDarwin(t *testing.T) {
+	cmd := guiLaunchCommand("darwin", "/Applications/TSession.app")
+	if got, want := filepath.Base(cmd.Path), "open"; got != want {
+		t.Fatalf("command path basename = %q, want %q", got, want)
+	}
+	if len(cmd.Args) != 2 || cmd.Args[1] != "/Applications/TSession.app" {
+		t.Fatalf("command args = %#v, want open /Applications/TSession.app", cmd.Args)
+	}
+}
+
+func TestGUILaunchCommandDetachesNonDarwinProcess(t *testing.T) {
+	cmd := guiLaunchCommand("linux", "/tmp/tsession-gui")
+	if cmd.Path != "/tmp/tsession-gui" {
+		t.Fatalf("command path = %q, want /tmp/tsession-gui", cmd.Path)
+	}
+	assertDetachedGUICommand(t, cmd)
+}
+
+func assertDetachedGUICommand(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	if cmd.SysProcAttr == nil {
+		t.Fatal("expected non-darwin GUI command to have SysProcAttr for detached launch")
+	}
 }

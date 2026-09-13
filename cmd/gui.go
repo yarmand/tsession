@@ -93,15 +93,20 @@ func exists(path string) bool {
 }
 
 func launchGUIApp(goos string, appPath string) error {
-	var cmd *exec.Cmd
-	switch goos {
-	case "darwin":
-		cmd = exec.Command("open", appPath)
-	default:
-		cmd = exec.Command(appPath)
-	}
+	cmd := guiLaunchCommand(goos, appPath)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch %s: %w", appPath, err)
 	}
 	return nil
+}
+
+func guiLaunchCommand(goos string, appPath string) *exec.Cmd {
+	switch goos {
+	case "darwin":
+		return exec.Command("open", appPath)
+	default:
+		cmd := exec.Command(appPath)
+		detachGUICommand(cmd)
+		return cmd
+	}
 }

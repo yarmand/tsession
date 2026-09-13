@@ -74,9 +74,13 @@ func guiAppCandidates(goos string, exeDir string, homeDir string) []string {
 			filepath.Join(os.Getenv("LOCALAPPDATA"), "TSession", "TSession.exe"),
 		}
 	default:
-		candidates := []string{filepath.Join(exeDir, "tsession-gui")}
+		candidates := []string{
+			filepath.Join(exeDir, "TSession"),
+			filepath.Join(exeDir, "tsession-gui"),
+		}
 		if pathEnv := os.Getenv("PATH"); pathEnv != "" {
 			for _, dir := range filepath.SplitList(pathEnv) {
+				candidates = append(candidates, filepath.Join(dir, "TSession"))
 				candidates = append(candidates, filepath.Join(dir, "tsession-gui"))
 			}
 		}

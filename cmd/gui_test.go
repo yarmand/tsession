@@ -80,6 +80,40 @@ func TestLocateGUIAppErrorsWithSearchedPathsWhenNotFound(t *testing.T) {
 	}
 }
 
+func TestLocateGUIAppFindsWailsOutputNameNextToExecutableOnLinux(t *testing.T) {
+	exeDir := t.TempDir()
+	appPath := filepath.Join(exeDir, "TSession")
+	if err := os.WriteFile(appPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write app: %v", err)
+	}
+
+	got, err := locateGUIApp("linux", exeDir, t.TempDir())
+	if err != nil {
+		t.Fatalf("locateGUIApp: %v", err)
+	}
+	if got != appPath {
+		t.Fatalf("locateGUIApp = %q, want %q", got, appPath)
+	}
+}
+
+func TestLocateGUIAppFindsWailsOutputNameOnLinuxPath(t *testing.T) {
+	exeDir := t.TempDir()
+	pathDir := t.TempDir()
+	appPath := filepath.Join(pathDir, "TSession")
+	if err := os.WriteFile(appPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write app: %v", err)
+	}
+	t.Setenv("PATH", pathDir)
+
+	got, err := locateGUIApp("linux", exeDir, t.TempDir())
+	if err != nil {
+		t.Fatalf("locateGUIApp: %v", err)
+	}
+	if got != appPath {
+		t.Fatalf("locateGUIApp = %q, want %q", got, appPath)
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (func() bool {
 		for i := 0; i+len(needle) <= len(haystack); i++ {

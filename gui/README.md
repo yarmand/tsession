@@ -29,10 +29,13 @@ cd gui
 wails build
 ```
 
-The resulting app bundle is written to `gui/build/bin/` (e.g.
-`TSession.app` on macOS). Install it wherever `tsession gui` looks for it:
+The resulting app bundle/binary is written to `gui/build/bin/` (for
+example, `TSession.app` on macOS, `TSession.exe` on Windows, and
+`TSession` on Linux). Install it wherever `tsession gui` looks for it:
 next to the `tsession` binary, or the platform's conventional Applications
-directory (see `cmd/gui.go`'s `locateGUIApp` for the exact search order).
+directory/search path (see `cmd/gui.go`'s `locateGUIApp` for the exact
+search order). On Linux, `tsession-gui` is also accepted as a compatibility
+symlink name, but the Wails output name is `TSession`.
 
 ## Developing
 

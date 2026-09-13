@@ -11,11 +11,16 @@ import (
 // server, which serves gui/frontend/dist). This is how the static loader
 // page (frontend/dist/index.html) learns where to navigate without any
 // Wails Go<->JS runtime binding.
-func portMiddleware(port int, next http.Handler) http.Handler {
+func portMiddleware(port func() int, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/tsession-port" {
+			p := port()
+			if p <= 0 {
+				http.Error(w, "tsession embedded server is not ready", http.StatusServiceUnavailable)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"port":%d}`, port)
+			fmt.Fprintf(w, `{"port":%d}`, p)
 			return
 		}
 		next.ServeHTTP(w, r)

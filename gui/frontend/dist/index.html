@@ -21,11 +21,10 @@
   <div id="status">Starting tsession&hellip;</div>
   <script>
     // The real UI (session list + xterm.js terminal) is served by the
-    // embedded internal/webui server started in gui/main.go before this
-    // window is shown. That server publishes its own address at
-    // "/tsession-port" via a small HTTP middleware (see gui/main.go) so
-    // this loader never needs a Wails Go<->JS runtime binding to learn
-    // where to navigate.
+    // embedded internal/webui server started from Wails' startup hook.
+    // The native asset server publishes the web UI's ready port at
+    // "/tsession-port" so this loader never needs a Wails Go<->JS runtime
+    // binding to learn where to navigate.
     (function poll(attempt) {
       fetch("/tsession-port", { cache: "no-store" })
         .then(function (resp) {
@@ -38,7 +37,7 @@
         .catch(function () {
           if (attempt >= 20) {
             document.getElementById("status").textContent =
-              "tsession failed to start. Check the app's logs and try again.";
+              "tsession failed to start. Check the native error dialog and try again.";
             return;
           }
           setTimeout(function () { poll(attempt + 1); }, 100);

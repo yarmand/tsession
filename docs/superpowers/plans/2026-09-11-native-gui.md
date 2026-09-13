@@ -410,7 +410,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks (only `net/http`).
-- Produces: `func portMiddleware(port int, next http.Handler) http.Handler` — used by Task 5's `main.go` as the Wails `AssetServer.Middleware`.
+- Produces: `func portMiddleware(port func() int, next http.Handler) http.Handler` — used by Task 5's `main.go` as the Wails `AssetServer.Middleware`.
 
 This is the piece the loader page's `fetch("/tsession-port")` (Task 2) talks to. Splitting it out lets it be tested with a plain `httptest.NewRecorder()`, with no Wails runtime involved at all.
 
@@ -429,7 +429,7 @@ import (
 
 func TestPortMiddlewareServesPortAsJSON(t *testing.T) {
 	inner := http.NewServeMux()
-	handler := portMiddleware(4321, inner)
+	handler := portMiddleware(func() int { return 4321 }, inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/tsession-port", nil)
 	rec := httptest.NewRecorder()
@@ -452,7 +452,7 @@ func TestPortMiddlewarePassesOtherPathsThrough(t *testing.T) {
 	inner.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("loader"))
 	})
-	handler := portMiddleware(4321, inner)
+	handler := portMiddleware(func() int { return 4321 }, inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
 	rec := httptest.NewRecorder()
@@ -469,7 +469,7 @@ func TestPortMiddlewarePassesNonGetPortRequestsThrough(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		w.Write([]byte("inner"))
 	})
-	handler := portMiddleware(4321, inner)
+	handler := portMiddleware(func() int { return 4321 }, inner)
 
 	req := httptest.NewRequest(http.MethodPost, "/tsession-port", nil)
 	rec := httptest.NewRecorder()
@@ -480,6 +480,19 @@ func TestPortMiddlewarePassesNonGetPortRequestsThrough(t *testing.T) {
 	}
 	if rec.Body.String() != "inner" {
 		t.Fatalf("expected pass-through to inner handler, got %q", rec.Body.String())
+	}
+}
+
+func TestPortMiddlewareReportsNotReadyWhenPortUnavailable(t *testing.T) {
+	inner := http.NewServeMux()
+	handler := portMiddleware(func() int { return 0 }, inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/tsession-port", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }
 ```
@@ -505,11 +518,16 @@ import (
 // server, which serves gui/frontend/dist). This is how the static loader
 // page (frontend/dist/index.html) learns where to navigate without any
 // Wails Go<->JS runtime binding.
-func portMiddleware(port int, next http.Handler) http.Handler {
+func portMiddleware(port func() int, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/tsession-port" {
+			p := port()
+			if p <= 0 {
+				http.Error(w, "tsession embedded server is not ready", http.StatusServiceUnavailable)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"port":%d}`, port)
+			fmt.Fprintf(w, `{"port":%d}`, p)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -553,15 +571,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/yarma/tsession/cmd"
 	"github.com/yarma/tsession/internal/webterm"
-	"github.com/yarma/tsession/internal/webui"
 )
 
 // defaultGUIAddr matches cmd.defaultServeAddr so the native app and a
@@ -574,49 +593,71 @@ const defaultGUIAddr = "127.0.0.1:4270"
 // OnShutdown, not as a JS-callable binding — the frontend never calls
 // into Go directly (see gui/frontend/dist/index.html).
 type App struct {
+	mu       sync.RWMutex
 	listener net.Listener
 	registry *webterm.Registry
 	http     *http.Server
 }
 
-// newApp starts listening and constructs the embedded web UI server, but
-// does not start serving yet — that happens in start(), called from
-// OnStartup once Wails has a context to report fatal errors against.
-func newApp() (*App, error) {
+func newApp() *App {
+	return &App{}
+}
+
+// startEmbeddedServer starts the embedded web UI server and only publishes
+// its port after the HTTP endpoint has answered a readiness probe. Until
+// then, /tsession-port returns 503 and the loader page keeps polling.
+func (a *App) startEmbeddedServer(ctx context.Context) error {
 	listener, err := listenWithFallback(defaultGUIAddr)
 	if err != nil {
-		return nil, fmt.Errorf("start embedded server listener: %w", err)
+		return fmt.Errorf("start embedded server listener: %w", err)
 	}
 
 	srv, registry, err := cmd.BuildEmbeddedServer(14 * 24 * time.Hour)
 	if err != nil {
-		listener.Close()
-		return nil, fmt.Errorf("build embedded web UI server: %w", err)
+		_ = listener.Close()
+		return fmt.Errorf("build embedded web UI server: %w", err)
 	}
 
-	return &App{
-		listener: listener,
-		registry: registry,
-		http:     &http.Server{Handler: srv.Handler()},
-	}, nil
+	httpServer := &http.Server{Handler: srv.Handler()}
+	go func() {
+		err := httpServer.Serve(listener)
+		if err != nil && err != http.ErrServerClosed {
+			a.showErrorAndQuit(ctx, fmt.Sprintf("The embedded tsession server stopped unexpectedly:\n\n%v", err))
+		}
+	}()
+
+	if err := waitForServerReady(listener.Addr().(*net.TCPAddr).Port); err != nil {
+		_ = httpServer.Close()
+		_ = registry.Shutdown()
+		return err
+	}
+
+	a.mu.Lock()
+	a.listener = listener
+	a.registry = registry
+	a.http = httpServer
+	a.mu.Unlock()
+	return nil
 }
 
 // port reports the concrete TCP port the embedded server bound, for
 // portMiddleware to publish at /tsession-port.
 func (a *App) port() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.listener == nil {
+		return 0
+	}
 	return a.listener.Addr().(*net.TCPAddr).Port
 }
 
-// startup is Wails' OnStartup hook: it starts serving the embedded server
-// in the background and reports a fatal error dialog (then quits) if it
-// exits unexpectedly — e.g. the listener is torn down externally.
+// startup is Wails' OnStartup hook: it starts the embedded server after the
+// runtime context exists, so startup failures can be shown in a native
+// dialog instead of disappearing into stderr when launched from a GUI.
 func (a *App) startup(ctx context.Context) {
-	go func() {
-		err := a.http.Serve(a.listener)
-		if err != nil && err != http.ErrServerClosed {
-			runtime.LogFatal(ctx, fmt.Sprintf("embedded server stopped unexpectedly: %v", err))
-		}
-	}()
+	if err := a.startEmbeddedServer(ctx); err != nil {
+		a.showErrorAndQuit(ctx, fmt.Sprintf("Failed to start the embedded tsession server:\n\n%v", err))
+	}
 }
 
 // shutdown is Wails' OnShutdown hook: it stops the HTTP server and tears
@@ -626,14 +667,65 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = a.http.Shutdown(shutdownCtx)
-	_ = a.registry.Shutdown()
+	a.mu.RLock()
+	httpServer := a.http
+	registry := a.registry
+	a.mu.RUnlock()
+	if httpServer != nil {
+		_ = httpServer.Shutdown(shutdownCtx)
+	}
+	if registry != nil {
+		_ = registry.Shutdown()
+	}
+	_ = ctx
 }
 
-var _ = webui.Server{} // keep the import; used transitively via cmd.BuildEmbeddedServer's return type
-```
+func (a *App) showErrorAndQuit(ctx context.Context, message string) {
+	_, _ = runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+		Type:    runtime.ErrorDialog,
+		Title:   "TSession",
+		Message: message,
+	})
+	runtime.Quit(ctx)
+}
 
-The trailing `var _ = webui.Server{}` line exists only because `webui.Server` is referenced in this file's doc comments but not by name in code once `srv` is passed straight to `a.http.Server{Handler: srv.Handler()}` — remove that line and the `internal/webui` import together if `go vet` reports it unused after Step 3's build check (keep whichever satisfies `go vet` cleanly; do not leave an unused import).
+func waitForServerReady(port int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+				return nil
+			}
+			lastErr = fmt.Errorf("GET %s returned status %d", url, resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("wait for embedded server readiness: %w", lastErr)
+			}
+			return fmt.Errorf("wait for embedded server readiness: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+```
 
 - [ ] **Step 2: Write `gui/main.go`**
 
@@ -643,6 +735,7 @@ package main
 import (
 	"embed"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/wailsapp/wails/v2"
@@ -654,20 +747,16 @@ import (
 var assets embed.FS
 
 func main() {
-	app, err := newApp()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "tsession gui: failed to start embedded server:", err)
-		os.Exit(1)
-	}
+	app := newApp()
 
-	err = wails.Run(&options.App{
+	err := wails.Run(&options.App{
 		Title:  "TSession",
 		Width:  1280,
 		Height: 800,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 			Middleware: func(next http.Handler) http.Handler {
-				return portMiddleware(app.port(), next)
+				return portMiddleware(app.port, next)
 			},
 		},
 		OnStartup:  app.startup,
@@ -834,6 +923,40 @@ func TestLocateGUIAppErrorsWithSearchedPathsWhenNotFound(t *testing.T) {
 	}
 }
 
+func TestLocateGUIAppFindsWailsOutputNameNextToExecutableOnLinux(t *testing.T) {
+	exeDir := t.TempDir()
+	appPath := filepath.Join(exeDir, "TSession")
+	if err := os.WriteFile(appPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write app: %v", err)
+	}
+
+	got, err := locateGUIApp("linux", exeDir, t.TempDir())
+	if err != nil {
+		t.Fatalf("locateGUIApp: %v", err)
+	}
+	if got != appPath {
+		t.Fatalf("locateGUIApp = %q, want %q", got, appPath)
+	}
+}
+
+func TestLocateGUIAppFindsWailsOutputNameOnLinuxPath(t *testing.T) {
+	exeDir := t.TempDir()
+	pathDir := t.TempDir()
+	appPath := filepath.Join(pathDir, "TSession")
+	if err := os.WriteFile(appPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write app: %v", err)
+	}
+	t.Setenv("PATH", pathDir)
+
+	got, err := locateGUIApp("linux", exeDir, t.TempDir())
+	if err != nil {
+		t.Fatalf("locateGUIApp: %v", err)
+	}
+	if got != appPath {
+		t.Fatalf("locateGUIApp = %q, want %q", got, appPath)
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (func() bool {
 		for i := 0; i+len(needle) <= len(haystack); i++ {
@@ -941,10 +1064,12 @@ func locateGUIApp(goos string, exeDir string, homeDir string) (string, error) {
 		}
 	default: // linux and other unix-likes
 		candidates = []string{
+			filepath.Join(exeDir, "TSession"),
 			filepath.Join(exeDir, "tsession-gui"),
 		}
 		if pathEnv := os.Getenv("PATH"); pathEnv != "" {
 			for _, dir := range filepath.SplitList(pathEnv) {
+				candidates = append(candidates, filepath.Join(dir, "TSession"))
 				candidates = append(candidates, filepath.Join(dir, "tsession-gui"))
 			}
 		}
@@ -1200,4 +1325,4 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
 - **Spec coverage:** module split (Task 2), embedded-server reuse with zero duplication (Task 1 + Task 5), loader page with no Wails bindings (Task 2 + Task 4 + Task 5), launcher-only CLI role with explicit "searched paths" error (Task 7), icon reuse (Task 6), cross-platform search paths for macOS/Windows/Linux (Task 7), docs for all three usage modes (Task 8, plus the already-committed README table). Out-of-scope items from the spec (CI/signing/installers/auto-update/tray) are intentionally not tasked here.
 - **Placeholder scan:** no TBD/TODO; every step has literal code or exact commands.
-- **Type consistency:** `cmd.BuildEmbeddedServer(time.Duration) (*webui.Server, *webterm.Registry, error)` (Task 1) is the exact signature consumed in Task 5's `newApp()`. `listenWithFallback(string) (net.Listener, error)` (Task 3) and `portMiddleware(int, http.Handler) http.Handler` (Task 4) are consumed with matching types in Task 5. `locateGUIApp(goos, exeDir, homeDir string) (string, error)` (Task 7) matches its test calls exactly.
+- **Type consistency:** `cmd.BuildEmbeddedServer(time.Duration) (*webui.Server, *webterm.Registry, error)` (Task 1) is consumed in Task 5's `startEmbeddedServer()`. `listenWithFallback(string) (net.Listener, error)` (Task 3) and `portMiddleware(func() int, http.Handler) http.Handler` (Task 4) are consumed with matching types in Task 5. `locateGUIApp(goos, exeDir, homeDir string) (string, error)` (Task 7) matches its test calls exactly.

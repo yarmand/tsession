@@ -15,20 +15,16 @@ import (
 var assets embed.FS
 
 func main() {
-	app, err := newApp()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "tsession gui: failed to start embedded server:", err)
-		os.Exit(1)
-	}
+	app := newApp()
 
-	err = wails.Run(&options.App{
+	err := wails.Run(&options.App{
 		Title:  "TSession",
 		Width:  1280,
 		Height: 800,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 			Middleware: func(next http.Handler) http.Handler {
-				return portMiddleware(app.port(), next)
+				return portMiddleware(app.port, next)
 			},
 		},
 		OnStartup:  app.startup,

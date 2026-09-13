@@ -3,15 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/yarma/tsession/cmd"
 	"github.com/yarma/tsession/internal/webterm"
-	"github.com/yarma/tsession/internal/webui"
 )
 
 // defaultGUIAddr matches cmd.defaultServeAddr so the native app and a
@@ -24,51 +25,71 @@ const defaultGUIAddr = "127.0.0.1:4270"
 // OnShutdown, not as a JS-callable binding — the frontend never calls
 // into Go directly (see gui/frontend/dist/index.html).
 type App struct {
+	mu       sync.RWMutex
 	listener net.Listener
 	registry *webterm.Registry
-	server   *webui.Server
 	http     *http.Server
 }
 
-// newApp starts listening and constructs the embedded web UI server, but
-// does not start serving yet — that happens in start(), called from
-// OnStartup once Wails has a context to report fatal errors against.
-func newApp() (*App, error) {
+func newApp() *App {
+	return &App{}
+}
+
+// startEmbeddedServer starts the embedded web UI server and only publishes
+// its port after the HTTP endpoint has answered a readiness probe. Until
+// then, /tsession-port returns 503 and the loader page keeps polling.
+func (a *App) startEmbeddedServer(ctx context.Context) error {
 	listener, err := listenWithFallback(defaultGUIAddr)
 	if err != nil {
-		return nil, fmt.Errorf("start embedded server listener: %w", err)
+		return fmt.Errorf("start embedded server listener: %w", err)
 	}
 
 	srv, registry, err := cmd.BuildEmbeddedServer(14 * 24 * time.Hour)
 	if err != nil {
 		_ = listener.Close()
-		return nil, fmt.Errorf("build embedded web UI server: %w", err)
+		return fmt.Errorf("build embedded web UI server: %w", err)
 	}
 
-	return &App{
-		listener: listener,
-		registry: registry,
-		server:   srv,
-		http:     &http.Server{Handler: srv.Handler()},
-	}, nil
+	httpServer := &http.Server{Handler: srv.Handler()}
+	go func() {
+		err := httpServer.Serve(listener)
+		if err != nil && err != http.ErrServerClosed {
+			a.showErrorAndQuit(ctx, fmt.Sprintf("The embedded tsession server stopped unexpectedly:\n\n%v", err))
+		}
+	}()
+
+	if err := waitForServerReady(listener.Addr().(*net.TCPAddr).Port); err != nil {
+		_ = httpServer.Close()
+		_ = registry.Shutdown()
+		return err
+	}
+
+	a.mu.Lock()
+	a.listener = listener
+	a.registry = registry
+	a.http = httpServer
+	a.mu.Unlock()
+	return nil
 }
 
 // port reports the concrete TCP port the embedded server bound, for
 // portMiddleware to publish at /tsession-port.
 func (a *App) port() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.listener == nil {
+		return 0
+	}
 	return a.listener.Addr().(*net.TCPAddr).Port
 }
 
-// startup is Wails' OnStartup hook: it starts serving the embedded server
-// in the background and reports a fatal error dialog (then quits) if it
-// exits unexpectedly — e.g. the listener is torn down externally.
+// startup is Wails' OnStartup hook: it starts the embedded server after the
+// runtime context exists, so startup failures can be shown in a native
+// dialog instead of disappearing into stderr when launched from a GUI.
 func (a *App) startup(ctx context.Context) {
-	go func() {
-		err := a.http.Serve(a.listener)
-		if err != nil && err != http.ErrServerClosed {
-			runtime.LogFatal(ctx, fmt.Sprintf("embedded server stopped unexpectedly: %v", err))
-		}
-	}()
+	if err := a.startEmbeddedServer(ctx); err != nil {
+		a.showErrorAndQuit(ctx, fmt.Sprintf("Failed to start the embedded tsession server:\n\n%v", err))
+	}
 }
 
 // shutdown is Wails' OnShutdown hook: it stops the HTTP server and tears
@@ -78,7 +99,61 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = a.http.Shutdown(shutdownCtx)
-	_ = a.registry.Shutdown()
+	a.mu.RLock()
+	httpServer := a.http
+	registry := a.registry
+	a.mu.RUnlock()
+	if httpServer != nil {
+		_ = httpServer.Shutdown(shutdownCtx)
+	}
+	if registry != nil {
+		_ = registry.Shutdown()
+	}
 	_ = ctx
+}
+
+func (a *App) showErrorAndQuit(ctx context.Context, message string) {
+	_, _ = runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+		Type:    runtime.ErrorDialog,
+		Title:   "TSession",
+		Message: message,
+	})
+	runtime.Quit(ctx)
+}
+
+func waitForServerReady(port int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+				return nil
+			}
+			lastErr = fmt.Errorf("GET %s returned status %d", url, resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("wait for embedded server readiness: %w", lastErr)
+			}
+			return fmt.Errorf("wait for embedded server readiness: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }

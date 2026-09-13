@@ -8,7 +8,7 @@ import (
 
 func TestPortMiddlewareServesPortAsJSON(t *testing.T) {
 	inner := http.NewServeMux()
-	handler := portMiddleware(4321, inner)
+	handler := portMiddleware(func() int { return 4321 }, inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/tsession-port", nil)
 	rec := httptest.NewRecorder()
@@ -31,7 +31,7 @@ func TestPortMiddlewarePassesOtherPathsThrough(t *testing.T) {
 	inner.HandleFunc("/index.html", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("loader"))
 	})
-	handler := portMiddleware(4321, inner)
+	handler := portMiddleware(func() int { return 4321 }, inner)
 
 	req := httptest.NewRequest(http.MethodGet, "/index.html", nil)
 	rec := httptest.NewRecorder()
@@ -48,7 +48,7 @@ func TestPortMiddlewarePassesNonGetPortRequestsThrough(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		w.Write([]byte("inner"))
 	})
-	handler := portMiddleware(4321, inner)
+	handler := portMiddleware(func() int { return 4321 }, inner)
 
 	req := httptest.NewRequest(http.MethodPost, "/tsession-port", nil)
 	rec := httptest.NewRecorder()
@@ -59,5 +59,18 @@ func TestPortMiddlewarePassesNonGetPortRequestsThrough(t *testing.T) {
 	}
 	if rec.Body.String() != "inner" {
 		t.Fatalf("expected pass-through to inner handler, got %q", rec.Body.String())
+	}
+}
+
+func TestPortMiddlewareReportsNotReadyWhenPortUnavailable(t *testing.T) {
+	inner := http.NewServeMux()
+	handler := portMiddleware(func() int { return 0 }, inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/tsession-port", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }

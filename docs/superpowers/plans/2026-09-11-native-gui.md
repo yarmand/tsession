@@ -970,21 +970,66 @@ func locateGUIApp(goos string, exeDir string, homeDir string) (string, error) {
 // launchGUIApp starts the located app, detached from this process so
 // closing the terminal that ran `tsession gui` does not kill it.
 func launchGUIApp(goos string, appPath string) error {
-	var cmd *exec.Cmd
-	switch goos {
-	case "darwin":
-		cmd = exec.Command("open", "-a", appPath)
-	default:
-		cmd = exec.Command(appPath)
-	}
+	cmd := guiLaunchCommand(goos, appPath)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch %s: %w", appPath, err)
 	}
 	return nil
 }
+
+func guiLaunchCommand(goos string, appPath string) *exec.Cmd {
+	switch goos {
+	case "darwin":
+		return exec.Command("open", appPath)
+	default:
+		cmd := exec.Command(appPath)
+		detachGUICommand(cmd)
+		return cmd
+	}
+}
 ```
 
-- [ ] **Step 4: Add the `runtimeGOOS` seam**
+- [ ] **Step 4: Add platform-specific detachment helpers**
+
+Create `cmd/gui_detach_unix.go`:
+
+```go
+//go:build !windows
+
+package cmd
+
+import (
+	"os/exec"
+	"syscall"
+)
+
+func detachGUICommand(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+}
+```
+
+Create `cmd/gui_detach_windows.go`:
+
+```go
+//go:build windows
+
+package cmd
+
+import (
+	"os/exec"
+	"syscall"
+)
+
+const windowsDetachedProcess = 0x00000008
+
+func detachGUICommand(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windowsDetachedProcess,
+	}
+}
+```
+
+- [ ] **Step 5: Add the `runtimeGOOS` seam**
 
 At the top of `cmd/gui.go`, add the import and package-level var so `goos()` has something to return without importing `runtime` directly into test-covered logic (this keeps `locateGUIApp` itself 100% pure/testable while production code still reflects the real OS):
 
@@ -996,12 +1041,12 @@ var runtimeGOOS = runtime.GOOS
 
 (Fold this into the same file rather than a separate one — it is a two-line seam, not worth its own file.)
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 6: Run tests to verify they pass**
 
-Run: `go test ./cmd/... -run TestLocateGUIApp -v`
-Expected: PASS (all four subtests)
+Run: `go test ./cmd/... -run 'TestLocateGUIApp|TestGUILaunchCommand' -v`
+Expected: PASS (all locator and launch-command-construction subtests)
 
-- [ ] **Step 6: Wire `gui` into `main.go`**
+- [ ] **Step 7: Wire `gui` into `main.go`**
 
 In `main.go`, add a new case to the subcommand switch, right after the existing `"serve"` case:
 
@@ -1019,15 +1064,28 @@ And add a line to the `usage()` function's help text, after the `tsession serve`
   tsession gui                  Launch the installed native GUI app (see gui/)
 ```
 
-- [ ] **Step 7: Run the full suite**
+- [ ] **Step 8: Run the full suite**
 
 Run: `go build ./... && go vet ./... && go test ./...`
 Expected: all packages PASS, including the four new `TestLocateGUIApp*` subtests.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Compile-check platform detachment helpers**
+
+Run:
 
 ```bash
-git add cmd/gui.go cmd/gui_test.go main.go
+GOOS=windows GOARCH=amd64 go test -c cmd/gui_detach_windows.go
+rm -f gui_detach_windows.test
+GOOS=linux GOARCH=amd64 go test -c cmd/gui_detach_unix.go
+rm -f gui_detach_unix.test
+```
+
+Expected: both compile-only helper checks succeed. (Do not use `GOOS=linux go test ./cmd` from macOS because it builds a Linux test binary and then tries to execute it locally.)
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add cmd/gui.go cmd/gui_test.go cmd/gui_detach_unix.go cmd/gui_detach_windows.go main.go
 git commit -m "cmd: add tsession gui launcher subcommand
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"syscall"
 )
 
 // listenWithFallback tries to bind preferred (typically the same address
@@ -11,11 +13,16 @@ import (
 // running). If preferred is already in use — e.g. `tsession serve` is
 // separately running, or a second copy of the native app is starting up —
 // it falls back to an OS-assigned ephemeral port on the same host so the
-// app still starts rather than failing outright.
+// app still starts rather than failing outright. Other listen errors are
+// returned as-is so configuration or permission problems are not hidden by
+// an unexpected fallback port.
 func listenWithFallback(preferred string) (net.Listener, error) {
 	l, err := net.Listen("tcp", preferred)
 	if err == nil {
 		return l, nil
+	}
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		return nil, fmt.Errorf("listen on %s: %w", preferred, err)
 	}
 
 	host, _, splitErr := net.SplitHostPort(preferred)

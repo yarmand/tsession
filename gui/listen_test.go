@@ -36,3 +36,10 @@ func TestListenWithFallbackFallsBackWhenPreferredIsTaken(t *testing.T) {
 		t.Fatalf("expected a different port than the taken one %d, got the same", want)
 	}
 }
+
+func TestListenWithFallbackDoesNotFallbackForNonAddrInUseErrors(t *testing.T) {
+	_, err := listenWithFallback("127.0.0.1:-1")
+	if err == nil {
+		t.Fatal("expected invalid preferred port to return an error")
+	}
+}

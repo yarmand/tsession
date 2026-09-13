@@ -462,6 +462,26 @@ func TestPortMiddlewarePassesOtherPathsThrough(t *testing.T) {
 		t.Fatalf("expected pass-through to inner handler, got %q", rec.Body.String())
 	}
 }
+
+func TestPortMiddlewarePassesNonGetPortRequestsThrough(t *testing.T) {
+	inner := http.NewServeMux()
+	inner.HandleFunc("/tsession-port", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte("inner"))
+	})
+	handler := portMiddleware(4321, inner)
+
+	req := httptest.NewRequest(http.MethodPost, "/tsession-port", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", rec.Code)
+	}
+	if rec.Body.String() != "inner" {
+		t.Fatalf("expected pass-through to inner handler, got %q", rec.Body.String())
+	}
+}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -487,7 +507,7 @@ import (
 // Wails Go<->JS runtime binding.
 func portMiddleware(port int, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/tsession-port" {
+		if r.Method == http.MethodGet && r.URL.Path == "/tsession-port" {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"port":%d}`, port)
 			return

@@ -13,7 +13,7 @@ import (
 // Wails Go<->JS runtime binding.
 func portMiddleware(port int, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/tsession-port" {
+		if r.Method == http.MethodGet && r.URL.Path == "/tsession-port" {
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintf(w, `{"port":%d}`, port)
 			return

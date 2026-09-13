@@ -8,6 +8,7 @@ Requires Go 1.25+, `tmux`, `fzf`, `lsof`.
 
 ```bash
 make install    # builds and installs to ~/.local/bin/tsession
+make gui        # builds the native Wails GUI app (requires wails)
 ```
 
 ## Browse — session navigation in a terminal split

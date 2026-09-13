@@ -25,8 +25,7 @@ no-ops.
 ## Building
 
 ```bash
-cd gui
-wails build
+make gui
 ```
 
 The resulting app bundle/binary is written to `gui/build/bin/` (for
@@ -36,6 +35,10 @@ next to the `tsession` binary, or the platform's conventional Applications
 directory/search path (see `cmd/gui.go`'s `locateGUIApp` for the exact
 search order). On Linux, `tsession-gui` is also accepted as a compatibility
 symlink name, but the Wails output name is `TSession`.
+
+`make gui` checks that the Wails CLI is installed before running
+`wails build` inside this module. To build from inside `gui/` directly, run
+`wails build`.
 
 ## Developing
 

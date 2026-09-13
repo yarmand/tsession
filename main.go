@@ -41,6 +41,8 @@ func main() {
 		err = cmd.Remote(args)
 	case "serve":
 		err = cmd.Serve(args)
+	case "gui":
+		err = cmd.Gui(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -70,6 +72,7 @@ Usage:
   tsession vscode <session-id> Open session directory in VS Code
   tsession remote serve        Run the remote RPC daemon (used over SSH)
   tsession serve [--addr] [--open]  Start the loopback web UI (browser terminal)
+  tsession gui                  Launch the installed native GUI app (see gui/)
   tsession watch [--daemon]    Refresh ~/.tsession/cache.json every --interval (default 10s)
   tsession stop-watch          Stop a running watch process
   tsession -h                  Show this help`)

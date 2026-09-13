@@ -317,17 +317,13 @@ the network untouched.
 
 #### Native GUI (`tsession gui`)
 
-> Design stage — see
-> `docs/superpowers/specs/2026-09-11-native-gui-design.md`; not yet
-> implemented.
-
-`tsession gui` will launch a separately built native application (Wails,
-covering macOS/Windows/Linux) that embeds the same `tsession serve` server
-internally and opens a plain OS window pointed at it — no browser required
-at all, and no separate `tsession serve` process to manage. The `tsession`
-CLI's `gui` subcommand only locates and launches the installed app; the app
-itself is built via a separate `wails build` pipeline documented in the
-design spec.
+`tsession gui` launches a separately built native application (Wails,
+covering macOS/Windows/Linux) that embeds the same web UI server internally
+and opens a plain OS window pointed at it — no browser required at all, and
+no separate `tsession serve` process to manage. The `tsession` CLI's `gui`
+subcommand only locates and launches the installed app; build the app
+itself from `gui/` — see `gui/README.md`. Design background:
+`docs/superpowers/specs/2026-09-11-native-gui-design.md`.
 
 
 

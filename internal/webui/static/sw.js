@@ -4,11 +4,12 @@
 // does very little: the app itself is inherently dynamic (live session
 // list, live PTY output over WebSocket, SSE notifications), so there is no
 // meaningful "offline" mode to build here — this only gives the static
-// shell (HTML/CSS/JS/vendor/icons) a cache-first path so a reload is fast
-// and works even if the server is briefly unreachable, while every other
+// shell (HTML/CSS/JS/vendor/icons) a network-first path so application
+// updates take effect immediately while cached assets remain available if
+// the server is briefly unreachable. Every other
 // request (notably /api/* and the /api/terminal WebSocket upgrade) passes
 // straight through to the network, untouched and uncached.
-const CACHE_NAME = "tsession-shell-v1";
+const CACHE_NAME = "tsession-shell-v2";
 const SHELL_PATHS = [
   "/",
   "/app.css",
@@ -63,11 +64,8 @@ self.addEventListener("fetch", (event) => {
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
           }
           return resp;
-        })
-        .catch(() => cached);
-      // Cache-first: serve instantly from cache when available, but still
-      // refresh the cache in the background so the shell stays current.
-      return cached || network;
+        });
+      return network.catch(() => cached);
     })
   );
 });

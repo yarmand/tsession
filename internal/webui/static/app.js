@@ -197,6 +197,7 @@
     state.fitAddon = new FitAddon.FitAddon();
     state.term.loadAddon(state.fitAddon);
     state.term.open(terminalEl);
+    state.term.onResize(() => sendResize());
     // Deferring the initial fit to the next frame ensures the container has
     // already been laid out (it was just unhidden by selectSession), so the
     // canvas backing store is sized against the real devicePixelRatio

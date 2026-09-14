@@ -73,3 +73,34 @@ func TestStaticAssets_ServesPWAIcons(t *testing.T) {
 		})
 	}
 }
+
+func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /app.js: status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "state.term.onResize(() => sendResize())") {
+		t.Fatal("app.js does not forward xterm resize events to the terminal WebSocket")
+	}
+	if !strings.Contains(rec.Body.String(), `JSON.stringify({ type: "resize", cols: state.term.cols, rows: state.term.rows })`) {
+		t.Fatal("app.js does not send xterm's current rows and columns in the resize control frame")
+	}
+}
+
+func TestStaticAssets_ServiceWorkerPrefersFreshShellAssets(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /sw.js: status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "return network.catch(() => cached)") {
+		t.Fatal("service worker is not network-first for shell assets")
+	}
+}

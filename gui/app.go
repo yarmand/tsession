@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -25,21 +26,32 @@ const defaultGUIAddr = "127.0.0.1:4270"
 // OnShutdown, not as a JS-callable binding — the frontend never calls
 // into Go directly (see gui/frontend/dist/index.html).
 type App struct {
-	mu       sync.RWMutex
-	listener net.Listener
-	registry *webterm.Registry
-	http     *http.Server
+	mu           sync.RWMutex
+	listener     net.Listener
+	registry     *webterm.Registry
+	http         *http.Server
+	externalPort int
 }
 
 func newApp() *App {
 	return &App{}
 }
 
-// startEmbeddedServer starts the embedded web UI server and only publishes
-// its port after the HTTP endpoint has answered a readiness probe. Until
-// then, /tsession-port returns 503 and the loader page keeps polling.
+// startEmbeddedServer starts the embedded web UI server (or attaches to an
+// existing tsession serve if one is already running) and publishes its port.
 func (a *App) startEmbeddedServer(ctx context.Context) error {
-	listener, err := listenWithFallback(defaultGUIAddr)
+	return a.startServerOnAddr(ctx, defaultGUIAddr)
+}
+
+func (a *App) startServerOnAddr(ctx context.Context, preferredAddr string) error {
+	if port, running := isExistingServerRunning(preferredAddr); running {
+		a.mu.Lock()
+		a.externalPort = port
+		a.mu.Unlock()
+		return nil
+	}
+
+	listener, err := listenWithFallback(preferredAddr)
 	if err != nil {
 		return fmt.Errorf("start embedded server listener: %w", err)
 	}
@@ -51,6 +63,13 @@ func (a *App) startEmbeddedServer(ctx context.Context) error {
 	}
 
 	httpServer := &http.Server{Handler: srv.Handler()}
+
+	a.mu.Lock()
+	a.listener = listener
+	a.registry = registry
+	a.http = httpServer
+	a.mu.Unlock()
+
 	go func() {
 		err := httpServer.Serve(listener)
 		if err != nil && err != http.ErrServerClosed {
@@ -61,22 +80,55 @@ func (a *App) startEmbeddedServer(ctx context.Context) error {
 	if err := waitForServerReady(listener.Addr().(*net.TCPAddr).Port); err != nil {
 		_ = httpServer.Close()
 		_ = registry.Shutdown()
+		a.mu.Lock()
+		a.listener = nil
+		a.registry = nil
+		a.http = nil
+		a.mu.Unlock()
 		return err
 	}
 
-	a.mu.Lock()
-	a.listener = listener
-	a.registry = registry
-	a.http = httpServer
-	a.mu.Unlock()
 	return nil
 }
 
-// port reports the concrete TCP port the embedded server bound, for
-// portMiddleware to publish at /tsession-port.
+func isExistingServerRunning(addr string) (int, bool) {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0, false
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0, false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	url := fmt.Sprintf("http://%s/api/sessions", net.JoinHostPort(host, portStr))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return port, true
+	}
+	return 0, false
+}
+
+// port reports the concrete TCP port the embedded server bound (or the port
+// of an existing tsession serve process), for portMiddleware to publish at
+// /tsession-port.
 func (a *App) port() int {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	if a.externalPort > 0 {
+		return a.externalPort
+	}
 	if a.listener == nil {
 		return 0
 	}

@@ -19,6 +19,15 @@ make install    # installs the CLI and native GUI under ~/.local/bin
 make gui        # builds the native Wails GUI app without installing it
 ```
 
+`make install` places the GUI beside the CLI, which is the first location
+searched by `tsession gui`:
+
+- macOS: `~/.local/bin/tsession` and `~/.local/bin/TSession.app`
+- Linux: `~/.local/bin/tsession` and `~/.local/bin/TSession`
+- Windows: `~/.local/bin/tsession` and `~/.local/bin/TSession.exe`
+
+Override the destination with `make install PREFIX=/path/to/bin`.
+
 ## Browse — session navigation in a terminal split
 
 The primary workflow: use your terminal's native split to create two panes side by side. The left pane runs tsession as a persistent navigator; the right pane has a tmux client where your sessions live.
@@ -306,7 +315,7 @@ are unmodified.
 |---|---|---|---|
 | **Browser tab** | `tsession serve --open` (or open the printed URL manually) | Regular browser tab, browser chrome and shortcuts included | None — just the `tsession` binary |
 | **Installed PWA** | Install once from the browser (see below), then launch like any app | Its own window, no browser chrome | One-time browser "Install" step; still served by `tsession serve` |
-| **Native GUI (`tsession gui`)** | `tsession gui` | Native OS window (Wails), no browser at all | A separately built/installed native app that `tsession gui` locates and launches |
+| **Native GUI (`tsession gui`)** | `tsession gui` | Native OS window (Wails), no browser at all | Included by `make install` |
 
 All three are front ends for the exact same embedded server and UI — the
 session-list panel, xterm.js terminal, PTY attach logic, and keyboard
@@ -319,19 +328,20 @@ The UI is an installable web app: Chrome/Edge show an install prompt (or
 Dock". Installing opens it in its own window with no browser chrome — a
 `manifest.json`, icon set, and a minimal service worker (`static/sw.js`) are
 embedded in the binary alongside the rest of the frontend, so this needs no
-separate install step or extra files on disk. The service worker only
-caches the static shell (HTML/CSS/JS/vendor/icons) for a fast reload; the
-session list, SSE notifications, and the terminal's WebSocket always go to
-the network untouched.
+separate install step or extra files on disk. The service worker keeps a
+cached static shell (HTML/CSS/JS/vendor/icons) for temporary server outages,
+but checks the network first so application updates take effect immediately.
+The session list, SSE notifications, and terminal WebSocket always go directly
+to the network.
 
 #### Native GUI (`tsession gui`)
 
-`tsession gui` launches a separately built native application (Wails,
-covering macOS/Windows/Linux) that embeds the same web UI server internally
-and opens a plain OS window pointed at it — no browser required at all, and
-no separate `tsession serve` process to manage. The `tsession` CLI's `gui`
-subcommand only locates and launches the installed app; build the app
-itself from `gui/` — see `gui/README.md`. Design background:
+`tsession gui` launches the native Wails application installed beside the CLI
+by `make install`. The application embeds the same web UI server internally
+and opens a plain OS window pointed at it — no browser required and no
+separate `tsession serve` process to manage. Use `make gui` to build the
+application without installing it. See `gui/README.md` for platform-specific
+prerequisites and direct Wails development commands. Design background:
 `docs/superpowers/specs/2026-09-11-native-gui-design.md`.
 
 

@@ -4,7 +4,15 @@ A session navigator for [Copilot CLI](https://github.com/github/copilot-cli) and
 
 ## Install
 
-Requires Go 1.25+, `tmux`, `fzf`, `lsof`.
+Requires Go 1.25+, `tmux`, `fzf`, `lsof`, the Wails v2 CLI
+(`go install github.com/wailsapp/wails/v2/cmd/wails@latest`), and the
+platform-native webview runtime used by `make gui`:
+
+- macOS: system WebKit
+- Windows: WebView2 runtime
+- Linux: `webkit2gtk` (for example `libwebkit2gtk-4.1-dev` on Debian/Ubuntu)
+
+See `gui/README.md` for the full GUI prerequisite list.
 
 ```bash
 make install    # installs the CLI and native GUI under ~/.local/bin

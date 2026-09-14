@@ -3,6 +3,7 @@
 BIN := tsession
 PREFIX ?= $(HOME)/.local/bin
 WAILS ?= wails
+WAILS_BUILD_FLAGS ?= $(if $(filter linux,$(shell go env GOOS)),-tags webkit2_41)
 
 build:
 	$(info "Building $(BIN)...")
@@ -11,7 +12,7 @@ build:
 gui:
 	$(info "Building GUI with $(WAILS)...")
 	@command -v $(WAILS) >/dev/null 2>&1 || { echo "error: wails is not installed. Install it with: go install github.com/wailsapp/wails/v2/cmd/wails@latest" >&2; exit 1; }
-	cd gui && $(WAILS) build
+	cd gui && $(WAILS) build $(WAILS_BUILD_FLAGS)
 
 install: build gui
 	mkdir -p $(PREFIX)

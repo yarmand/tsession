@@ -42,13 +42,15 @@ checked by `tsession gui`. Use `make gui` when only a build is wanted.
 
 `make gui` checks that the Wails CLI is installed before running
 `wails build` inside this module. To build from inside `gui/` directly, run
-`wails build`.
+`wails build` on macOS or Windows, or `wails build -tags webkit2_41` on
+Linux with WebKitGTK 4.1.
 
 ## Developing
 
 ```bash
 cd gui
-wails dev
+wails dev                         # macOS or Windows
+wails dev -tags webkit2_41        # Linux with WebKitGTK 4.1
 ```
 
 Opens the native window with the embedded server running, same as a real

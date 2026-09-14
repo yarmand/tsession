@@ -7,8 +7,8 @@ A session navigator for [Copilot CLI](https://github.com/github/copilot-cli) and
 Requires Go 1.25+, `tmux`, `fzf`, `lsof`.
 
 ```bash
-make install    # builds and installs to ~/.local/bin/tsession
-make gui        # builds the native Wails GUI app (requires wails)
+make install    # installs the CLI and native GUI under ~/.local/bin
+make gui        # builds the native Wails GUI app without installing it
 ```
 
 ## Browse — session navigation in a terminal split

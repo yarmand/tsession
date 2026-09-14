@@ -30,11 +30,15 @@ make gui
 
 The resulting app bundle/binary is written to `gui/build/bin/` (for
 example, `TSession.app` on macOS, `TSession.exe` on Windows, and
-`TSession` on Linux). Install it wherever `tsession gui` looks for it:
-next to the `tsession` binary, or the platform's conventional Applications
-directory/search path (see `cmd/gui.go`'s `locateGUIApp` for the exact
-search order). On Linux, `tsession-gui` is also accepted as a compatibility
-symlink name, but the Wails output name is `TSession`.
+`TSession` on Linux). `make install` from the repository root builds and
+installs both artifacts under `PREFIX` (default `~/.local/bin`):
+
+- macOS: `tsession` and `TSession.app`
+- Linux: `tsession` and `TSession`
+- Windows: `tsession` and `TSession.exe`
+
+The GUI is installed adjacent to the CLI, which is the first location
+checked by `tsession gui`. Use `make gui` when only a build is wanted.
 
 `make gui` checks that the Wails CLI is installed before running
 `wails build` inside this module. To build from inside `gui/` directly, run

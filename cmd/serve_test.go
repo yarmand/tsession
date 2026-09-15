@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/yarma/tsession/internal/config"
+	"github.com/yarma/tsession/internal/sessions"
 )
 
 func TestRequireLoopback(t *testing.T) {
@@ -81,6 +82,26 @@ func TestRemoteResolverFromConfig_LoadError(t *testing.T) {
 }
 
 func TestBuildEmbeddedServerReturnsWorkingHandlerAndRegistry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	origLoadAllLive := loadAllLiveFn
+	origLoadConfig := loadConfig
+	origReapOrphanedLocal := reapOrphanedLocal
+	t.Cleanup(func() {
+		loadAllLiveFn = origLoadAllLive
+		loadConfig = origLoadConfig
+		reapOrphanedLocal = origReapOrphanedLocal
+	})
+	loadAllLiveFn = func(time.Duration) ([]sessions.Session, error) {
+		return nil, nil
+	}
+	loadConfig = func() (*config.Config, error) {
+		return &config.Config{}, nil
+	}
+	reapOrphanedLocal = func() error {
+		return nil
+	}
+
 	srv, registry, err := BuildEmbeddedServer(14 * 24 * time.Hour)
 	if err != nil {
 		t.Fatalf("BuildEmbeddedServer: %v", err)

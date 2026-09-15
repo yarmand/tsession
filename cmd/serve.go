@@ -25,6 +25,8 @@ import (
 // repeated `tsession serve` invocations reuse the same URL.
 const defaultServeAddr = "127.0.0.1:4270"
 
+var reapOrphanedLocal = webterm.ReapOrphanedLocal
+
 // Serve runs `tsession serve`: a loopback-only web server exposing the
 // session list and a browser terminal (see internal/webui). It runs in the
 // foreground until interrupted (Ctrl-C) or sent SIGTERM, at which point it
@@ -96,7 +98,7 @@ func Serve(args []string) error {
 // returned registry and must call registry.Shutdown() when done (this also
 // tears down every warm PTY).
 func BuildEmbeddedServer(maxAge time.Duration) (*webui.Server, *webterm.Registry, error) {
-	if err := webterm.ReapOrphanedLocal(); err != nil {
+	if err := reapOrphanedLocal(); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: failed to reap orphaned web sessions:", err)
 	}
 

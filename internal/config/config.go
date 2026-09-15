@@ -26,6 +26,29 @@ type Config struct {
 	Remotes []Remote
 }
 
+// Endpoint returns the configured host/container identifier used to connect
+// to this remote, falling back to its display name.
+func (r Remote) Endpoint() string {
+	switch r.Type {
+	case "codespace":
+		if r.Codespace != "" {
+			return r.Codespace
+		}
+	case "devcontainer":
+		if r.Container != "" {
+			return r.Container
+		}
+	default:
+		if r.Host != "" {
+			return r.Host
+		}
+		if r.SSHCommand != "" {
+			return r.SSHCommand
+		}
+	}
+	return r.Name
+}
+
 // GatherCommand returns the binary and args for piping the gather script via stdin.
 // The caller appends: "bash -s -- <copilotDir> <hours>".
 func (r Remote) GatherCommand() (string, []string) {

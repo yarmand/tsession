@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -96,6 +97,34 @@ func TestListShort_UsesRepositoryAliasesAcrossLocalAndRemoteSections(t *testing.
 		if !strings.Contains(got, want) {
 			t.Fatalf("List() output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestListJSONPreservesTmuxMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	oldLoadAllLive := loadAllLiveFn
+	t.Cleanup(func() { loadAllLiveFn = oldLoadAllLive })
+	loadAllLiveFn = func(time.Duration) ([]sessions.Session, error) {
+		return []sessions.Session{{
+			ID:         "local",
+			CWD:        "/work/demo",
+			State:      sessions.StateActiveIdle,
+			TmuxName:   "demo",
+			TmuxTarget: "demo:2.1",
+			UpdatedAt:  time.Now().UTC(),
+		}}, nil
+	}
+
+	got, err := captureListOutput(t, []string{"--active", "--local-only", "--json", "--no-cache"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []sessions.Session
+	if err := json.Unmarshal([]byte(got), &listed); err != nil {
+		t.Fatalf("unmarshal JSON list: %v\n%s", err, got)
+	}
+	if len(listed) != 1 || listed[0].TmuxName != "demo" || listed[0].TmuxTarget != "demo:2.1" {
+		t.Fatalf("listed sessions = %+v", listed)
 	}
 }
 

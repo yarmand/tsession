@@ -21,7 +21,6 @@ import (
 const (
 	dirName      = ".tsession"
 	snapshotFile = "notify.json"
-	lockFile     = "notify.lock"
 )
 
 // fireFunc is the platform notification sender. It is a package variable so
@@ -202,17 +201,90 @@ func Process(ss []sessions.Session) error {
 	if err != nil {
 		return err
 	}
-	snapPath := filepath.Join(d, snapshotFile)
+	return ProcessWithStore(ss, filepath.Join(d, snapshotFile))
+}
 
-	unlock, err := lock(filepath.Join(d, lockFile))
+// Event describes one done/question transition detected by DiffWithStore,
+// carrying the same label and sound the desktop path would use — the web UI
+// renders Event as a browser Notification with identical text, so the two
+// surfaces are indistinguishable to the user.
+type Event struct {
+	SessionID string `json:"sessionId"`
+	Kind      string `json:"kind"` // "done" or "question"
+	Label     string `json:"label"`
+	Sound     string `json:"sound"`
+}
+
+// ProcessWithStore is Process, but reads/writes its snapshot at snapPath and
+// locks a sibling "<snapPath>.lock" file, instead of the package default
+// ~/.tsession/notify.json / notify.lock. This lets independent observers keep
+// fully separate state: the desktop notifier (watch --daemon --notify,
+// browse --watch --notify) and the web UI's browser-notification path each
+// need to see every done/question transition once, but they must not share a
+// lock or a snapshot — doing so would let one observer's read-modify-write
+// silently consume the transition the other was about to report, dropping a
+// notification on whichever side didn't win the race.
+func ProcessWithStore(ss []sessions.Session, snapPath string) error {
+	events, saveErr := diffAndUpdateStore(ss, snapPath)
+
+	var fireErrs []error
+	for _, e := range events {
+		if err := fireFunc(messageText(e), e.Sound); err != nil {
+			fireErrs = append(fireErrs, err)
+		}
+	}
+
+	if len(fireErrs) > 0 {
+		// Collapse repeated identical failures (e.g. the same permission
+		// error for every session) into a single user-visible message.
+		fireErr := fmt.Errorf("could not show %d notification(s): %w",
+			len(fireErrs), errors.Join(dedupeErrs(fireErrs)...))
+		return errors.Join(fireErr, saveErr)
+	}
+	return saveErr
+}
+
+// DiffWithStore is like ProcessWithStore — it diffs ss against the snapshot
+// at snapPath (locked the same way) and persists the update — but instead of
+// firing a desktop notification for each transition, it returns the
+// transitions as Events for the caller to deliver itself (e.g. over the web
+// UI's SSE stream, rendered as a browser Notification). This is the
+// mechanism the web path uses so it never invokes the macOS-only osascript
+// notifier.
+func DiffWithStore(ss []sessions.Session, snapPath string) ([]Event, error) {
+	return diffAndUpdateStore(ss, snapPath)
+}
+
+// messageText returns the notification text for an Event, matching
+// messageFor's text exactly so the desktop and web paths never diverge.
+func messageText(e Event) string {
+	msg, _ := messageFor(e.Kind, e.Label)
+	return msg.text
+}
+
+// diffAndUpdateStore performs the locked read-diff-write shared by
+// ProcessWithStore and DiffWithStore: it loads the snapshot at snapPath,
+// diffs ss against it to find sessions that just entered (or left) a
+// notifiable state, updates and persists the snapshot, and returns one
+// Event per newly-entered notifiable state. The first time a session ID is
+// seen its state is recorded silently (no Event) to avoid a flood for
+// sessions already done/waiting when observation begins. Sessions absent
+// from ss are pruned from the snapshot.
+func diffAndUpdateStore(ss []sessions.Session, snapPath string) ([]Event, error) {
+	if err := os.MkdirAll(filepath.Dir(snapPath), 0o755); err != nil {
+		return nil, err
+	}
+	lockPath := snapPath + ".lock"
+
+	unlock, err := lock(lockPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer unlock()
 
 	snap := loadSnapshot(snapPath)
 	seen := make(map[string]bool, len(ss))
-	var fireErrs []error
+	var events []Event
 
 	for _, s := range ss {
 		seen[s.ID] = true
@@ -225,15 +297,16 @@ func Process(ss []sessions.Session) error {
 		if cur == prev {
 			continue
 		}
-		// Advance the snapshot before firing so a notification that cannot
-		// be shown (permission denied, headless, osascript missing) degrades
-		// gracefully: it is reported once but not retried on every cycle.
 		snap.Entries[s.ID] = cur
-		if msg, ok := messageFor(cur, displayLabel(s)); ok {
-			if err := fireFunc(msg.text, msg.sound); err != nil {
-				fireErrs = append(fireErrs, err)
-			}
+		if cur == "" {
+			continue
 		}
+		label := displayLabel(s)
+		msg, ok := messageFor(cur, label)
+		if !ok {
+			continue
+		}
+		events = append(events, Event{SessionID: s.ID, Kind: cur, Label: label, Sound: msg.sound})
 	}
 
 	for id := range snap.Entries {
@@ -242,15 +315,7 @@ func Process(ss []sessions.Session) error {
 		}
 	}
 
-	saveErr := saveSnapshot(snapPath, snap)
-	if len(fireErrs) > 0 {
-		// Collapse repeated identical failures (e.g. the same permission
-		// error for every session) into a single user-visible message.
-		fireErr := fmt.Errorf("could not show %d notification(s): %w",
-			len(fireErrs), errors.Join(dedupeErrs(fireErrs)...))
-		return errors.Join(fireErr, saveErr)
-	}
-	return saveErr
+	return events, saveSnapshot(snapPath, snap)
 }
 
 // dedupeErrs removes duplicate error messages while preserving order so a

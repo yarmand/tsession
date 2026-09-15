@@ -1,0 +1,340 @@
+:root {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --panel-bg: #181818;
+  --border: #333;
+  --fg: #ddd;
+  --dim: #888;
+  --accent: #3b82f6;
+  --working: #4ade80;
+  --question: #facc15;
+  --done: #c084fc;
+  --active: #38bdf8;
+  --idle: #888;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+#app {
+  --sidebar-width: 20vw;
+  display: flex;
+  height: 100vh;
+}
+
+#app.sidebar-collapsed #sessions {
+  display: none;
+}
+
+#app.sidebar-collapsed.sidebar-overlay #sessions {
+  position: fixed;
+  z-index: 20;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: min(var(--sidebar-width), 85vw);
+  border-right: 1px solid var(--border);
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.55);
+}
+
+#sessions-toggle {
+  position: fixed;
+  z-index: 30;
+  top: 3px;
+  left: 4px;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #252525;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+#sessions-toggle:hover {
+  background: #333;
+}
+
+#sessions {
+  position: relative;
+  flex: 0 0 var(--sidebar-width);
+  width: var(--sidebar-width);
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#sessions-resize {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+#sessions-resize:hover,
+body.resizing-sidebar #sessions-resize {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+body.resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
+}
+
+#sessions-hint {
+  min-height: 28px;
+  padding: 6px 10px 4px 34px;
+  font-size: 10px;
+  color: var(--dim);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#sessions.panel-focused,
+#terminal-pane.panel-focused {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+#session-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#session-info {
+  flex: none;
+  max-height: 42%;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: #141414;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+}
+
+.info-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 6px;
+  margin: 2px 0;
+}
+
+.info-label {
+  color: var(--dim);
+}
+
+.info-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-summary .info-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.info-empty {
+  color: var(--dim);
+}
+
+.session-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.session-row:hover {
+  background: #242424;
+}
+
+.session-row.selected {
+  background: #26344a;
+}
+
+.session-row.cursor {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.session-row .line1 {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-row .glyph.working { color: var(--working); }
+.session-row .glyph.question { color: var(--question); }
+.session-row .glyph.done { color: var(--done); }
+.session-row .glyph.active { color: var(--active); }
+.session-row .glyph.idle,
+.session-row .glyph.exited,
+.session-row .glyph.unknown { color: var(--idle); }
+
+.session-row .repo {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-row .location {
+  flex: none;
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+}
+
+.session-row .location.local {
+  color: var(--dim);
+}
+
+.session-row .location.remote {
+  font-weight: 600;
+}
+
+.session-row .summary {
+  color: var(--dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-row .age {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+#terminal-pane {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #000;
+}
+
+#terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 4px;
+}
+
+#terminal.hidden { display: none; }
+
+#empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+}
+
+#terminal-banner {
+  background: #7f1d1d;
+  color: #fff;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#terminal-banner button {
+  background: #fff;
+  color: #7f1d1d;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.hidden { display: none !important; }
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal-box {
+  background: #222;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  width: 320px;
+}
+
+.modal-box h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.modal-box input {
+  width: 100%;
+  padding: 6px;
+  background: #111;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 4px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.modal-actions button {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: #333;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.modal-actions button#rename-save {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.error {
+  color: #f87171;
+  margin-top: 8px;
+  font-size: 12px;
+}

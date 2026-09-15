@@ -18,12 +18,20 @@ func TestRemoteShellInvocation_SendsCommandOnStdin(t *testing.T) {
 	if bin != "ssh" {
 		t.Fatalf("binary = %q, want ssh", bin)
 	}
-	wantArgs := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "devbox", "bash", "-l", "-s"}
+	wantArgs := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "devbox", "sh", "-s"}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %v, want %v", args, wantArgs)
 	}
-	if stdin != "set -e\ntmux has-session -t tsessiond\n" {
-		t.Fatalf("stdin = %q", stdin)
+	for _, want := range []string{
+		`remote_shell=${SHELL:-/bin/sh}`,
+		`*) shell_flags=-lic`,
+		`exec "$remote_shell" "$shell_flags"`,
+		remoteOutputMarker,
+		"tmux has-session -t tsessiond",
+	} {
+		if !strings.Contains(stdin, want) {
+			t.Errorf("stdin missing %q:\n%s", want, stdin)
+		}
 	}
 }
 
@@ -36,7 +44,7 @@ func stubRemoteBinary(t *testing.T, path string) {
 	t.Cleanup(func() { ensureRemoteBinaryFn = old })
 }
 
-func TestEnsureDaemonAndSnapshotDoesNotRequireRemoteTmux(t *testing.T) {
+func TestEnsureDaemonAndSnapshotPrefersPathBinaryAndListsActiveSessions(t *testing.T) {
 	oldRun := runRemoteCmd
 	oldEnsure := ensureRemoteBinaryFn
 	t.Cleanup(func() {
@@ -45,27 +53,37 @@ func TestEnsureDaemonAndSnapshotDoesNotRequireRemoteTmux(t *testing.T) {
 	})
 
 	ensureRemoteBinaryFn = func(context.Context, config.Remote, string, UpdateOptions) (string, error) {
-		return ".tsession/remote-bin/v0.5.0/tsession", nil
+		t.Fatal("installer called even though tsession is available in PATH")
+		return "", nil
 	}
 	var calls []string
 	runRemoteCmd = func(_ context.Context, _ config.Remote, command string) ([]byte, error) {
 		calls = append(calls, command)
-		if strings.Contains(command, "tmux ") {
-			return nil, fmt.Errorf("unexpected remote tmux dependency: %s", command)
+		if strings.Contains(command, "command -v tsession") {
+			return []byte("/usr/local/bin/tsession\n"), nil
 		}
-		return []byte(`{"protocolVersion":1,"ok":true,"payload":{"tmuxAvailable":false,"sessions":[]}}`), nil
+		if !strings.Contains(command, "watch --daemon") ||
+			strings.Contains(command, "watch --daemon --active") ||
+			!strings.Contains(command, "list --active --local-only --json") {
+			return nil, fmt.Errorf("unexpected remote command: %s", command)
+		}
+		return []byte(`[{"ID":"abc","State":3,"TmuxName":"work","TmuxTarget":"work:1.0"}]`), nil
 	}
 
-	_, err := EnsureDaemonAndSnapshot(context.Background(), config.Remote{Name: "container"}, FetchOptions{}, time.Hour)
+	got, err := EnsureDaemonAndSnapshot(context.Background(), config.Remote{Name: "devbox", Host: "devbox.example.com"}, FetchOptions{}, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 1 || !strings.Contains(calls[0], "remote rpc snapshot") {
-		t.Fatalf("calls = %v, want one-shot snapshot only", calls)
+	if len(calls) != 2 {
+		t.Fatalf("calls = %v, want PATH check followed by active list", calls)
+	}
+	if len(got) != 1 || got[0].Origin != "devbox" ||
+		got[0].RemoteTmuxTarget != "work:1.0" || !got[0].RemoteTmuxAvailable {
+		t.Fatalf("sessions = %+v", got)
 	}
 }
 
-func TestEnsureDaemonAndSnapshot_UsesInstalledBinaryAndRequestsSnapshot(t *testing.T) {
+func TestEnsureDaemonAndSnapshotInstallsOnlyWhenPathBinaryIsAbsent(t *testing.T) {
 	oldRunRemoteCmd := runRemoteCmd
 	defer func() { runRemoteCmd = oldRunRemoteCmd }()
 	oldEnsureRemoteBinary := ensureRemoteBinaryFn
@@ -79,10 +97,14 @@ func TestEnsureDaemonAndSnapshot_UsesInstalledBinaryAndRequestsSnapshot(t *testi
 	}
 	runRemoteCmd = func(ctx context.Context, r config.Remote, cmd string) ([]byte, error) {
 		calls = append(calls, cmd)
-		if !strings.Contains(cmd, "remote rpc snapshot") {
+		if strings.Contains(cmd, "command -v tsession") {
+			return nil, nil
+		}
+		if !strings.Contains(cmd, ".tsession/remote-bin/v1.2.3/tsession") ||
+			!strings.Contains(cmd, "list --active --local-only --json") {
 			return nil, fmt.Errorf("unexpected cmd: %s", cmd)
 		}
-		return []byte(`{"protocolVersion":1,"ok":true,"payload":{"sessions":[{"id":"abc","state":"working","summary":"demo"}]}}`), nil
+		return []byte(`[{"ID":"abc","State":5,"TmuxName":"work"}]`), nil
 	}
 	out, err := EnsureDaemonAndSnapshot(context.Background(), config.Remote{Name: "devbox", Host: "devbox"}, FetchOptions{ClientTag: "v1.2.3", CheckInterval: 24 * time.Hour}, 24*time.Hour)
 	if err != nil {
@@ -94,23 +116,23 @@ func TestEnsureDaemonAndSnapshot_UsesInstalledBinaryAndRequestsSnapshot(t *testi
 	if gotClientTag != "v1.2.3" {
 		t.Fatalf("installer client tag = %q, want v1.2.3", gotClientTag)
 	}
-	if len(calls) != 1 {
-		t.Fatalf("calls = %v, want one snapshot call", calls)
+	if len(calls) != 2 {
+		t.Fatalf("calls = %v, want PATH check and list call", calls)
 	}
-	for _, call := range calls {
-		if !strings.Contains(call, ".tsession/remote-bin/v1.2.3/tsession") {
-			t.Fatalf("remote command does not use installed binary: %s", call)
-		}
+	if !strings.Contains(calls[1], ".tsession/remote-bin/v1.2.3/tsession") {
+		t.Fatalf("remote command does not use installed binary: %s", calls[1])
 	}
 }
 
-func TestEnsureDaemonAndSnapshot_PropagatesSnapshotError(t *testing.T) {
-	stubRemoteBinary(t, "tsession")
+func TestEnsureDaemonAndSnapshot_PropagatesListError(t *testing.T) {
 	oldRunRemoteCmd := runRemoteCmd
 	defer func() { runRemoteCmd = oldRunRemoteCmd }()
 
 	runRemoteCmd = func(ctx context.Context, r config.Remote, cmd string) ([]byte, error) {
-		if strings.Contains(cmd, "remote rpc snapshot") {
+		if strings.Contains(cmd, "command -v tsession") {
+			return []byte("/usr/bin/tsession\n"), nil
+		}
+		if strings.Contains(cmd, "list --active") {
 			return nil, errors.New("ssh: connection refused")
 		}
 		return nil, fmt.Errorf("unexpected cmd: %s", cmd)

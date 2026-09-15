@@ -23,6 +23,20 @@ type Pane struct {
 	Title       string // terminal title (set by running app, e.g. copilot session summary)
 }
 
+// WebSessionPrefix is the prefix used for grouped tmux sessions created by
+// `tsession serve` to attach a browser terminal to an existing local session
+// without resizing it (see internal/attachcmd). Sessions and panes with this
+// prefix are synthetic — a grouped session shares its pane PIDs with the
+// original session, so any pane-PID-keyed matching (see
+// internal/sessions/tmuxmatch.go) must never treat them as an independent
+// session with its own identity. Every function in this package that returns
+// sessions or panes filters this prefix out before returning.
+const WebSessionPrefix = "tsession-web-"
+
+func isWebSession(name string) bool {
+	return strings.HasPrefix(name, WebSessionPrefix)
+}
+
 var listTmuxOutput = func(args ...string) ([]byte, error) {
 	return exec.Command("tmux", args...).CombinedOutput()
 }
@@ -60,9 +74,51 @@ func parseListSessions(s string) []Session {
 		if len(parts) != 2 {
 			continue
 		}
+		if isWebSession(parts[0]) {
+			continue
+		}
 		out = append(out, Session{Name: parts[0], Path: parts[1]})
 	}
 	return out
+}
+
+// ListWebSessionNames returns the names of local tmux sessions created by
+// `tsession serve` (see WebSessionPrefix). Unlike ListSessions, this is the
+// one place in the package that surfaces these synthetic sessions rather
+// than filtering them out — used by internal/webterm's startup reaper to
+// clean up sessions orphaned by a crashed or killed server.
+func ListWebSessionNames() ([]string, error) {
+	out, err := listTmuxOutput("list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		if noTmuxServer(out, err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && isWebSession(line) {
+			names = append(names, line)
+		}
+	}
+	return names, nil
+}
+
+// KillSession kills the named tmux session. It is a no-op (returns nil) if
+// no tmux server is running or the session does not exist.
+func KillSession(name string) error {
+	out, err := listTmuxOutput("kill-session", "-t", name)
+	if err != nil {
+		if noTmuxServer(out, err) {
+			return nil
+		}
+		if strings.Contains(string(out), "session not found") {
+			return nil
+		}
+		return fmt.Errorf("tmux kill-session -t %s: %w: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func SwitchClient(name string) error {
@@ -209,6 +265,9 @@ func parseListPanesWithTitle(s string) []Pane {
 		if len(parts) < 4 {
 			continue
 		}
+		if isWebSession(parts[0]) {
+			continue
+		}
 		pid, err := strconv.Atoi(strings.TrimSpace(parts[3]))
 		if err != nil {
 			continue
@@ -236,6 +295,9 @@ func parseListPanes(s string) []Pane {
 		}
 		parts := strings.Split(line, "|")
 		if len(parts) != 4 {
+			continue
+		}
+		if isWebSession(parts[0]) {
 			continue
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(parts[3]))

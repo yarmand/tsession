@@ -155,6 +155,10 @@ if command -v tmux >/dev/null 2>&1; then
     first=1
     while IFS='|' read -r name path; do
       [[ -n "$name" ]] || continue
+      # Skip grouped sessions created by `tsession serve` to attach a browser
+      # terminal — they share pane PIDs with the real session and must never
+      # be reported as an independent session (see internal/tmux.WebSessionPrefix).
+      [[ "$name" == tsession-web-* ]] && continue
       obj="$(encode_object tmux_session "$name" "$path")"
       if [[ $first -eq 1 ]]; then
         first=0
@@ -172,6 +176,7 @@ if command -v tmux >/dev/null 2>&1; then
     first=1
     while IFS='|' read -r session_name window_index pane_index pid; do
       [[ -n "$session_name" && "$pid" =~ ^[0-9]+$ ]] || continue
+      [[ "$session_name" == tsession-web-* ]] && continue
       obj="$(encode_object tmux_pane "$session_name" "$window_index" "$pane_index" "$pid")"
       if [[ $first -eq 1 ]]; then
         first=0

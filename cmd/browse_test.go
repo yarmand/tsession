@@ -179,6 +179,7 @@ func TestInitialListBytes_UsesRepositoryAliasesAcrossLocalAndRemoteSections(t *t
 			"devbox": {{
 				ID:         "remote",
 				Origin:     "devbox",
+				RemoteHost: "devbox.example.com",
 				CWD:        filepath.Join("/remote", "feat-remote"),
 				Repository: "https://github.com/example/repository-aliases.git",
 				Summary:    "remote summary",
@@ -204,18 +205,27 @@ func TestInitialListBytes_UsesRepositoryAliasesAcrossLocalAndRemoteSections(t *t
 	rows := make(map[string][]string)
 	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
 		fields := strings.Split(line, "\t")
-		if len(fields) == 10 {
+		if len(fields) == 12 {
 			rows[fields[1]] = fields
 		}
 	}
 	if got := rows["local"][8]; got != "" {
 		t.Fatalf("local legend field = %q, want empty", got)
 	}
+	if got := rows["local"][10]; got != "local" {
+		t.Fatalf("local remote host field = %q, want local", got)
+	}
+	if got := rows["local"][11]; got != "(none)" {
+		t.Fatalf("local tmux field = %q, want (none)", got)
+	}
 	if got := rows["remote"][2]; got != "https://github.com/example/repository-aliases.git" {
 		t.Fatalf("remote repo field = %q, want original repository", got)
 	}
 	if got := rows["remote"][9]; got != "devbox" {
 		t.Fatalf("remote origin field = %q, want devbox", got)
+	}
+	if got := rows["remote"][10]; got != "devbox.example.com" {
+		t.Fatalf("remote host field = %q, want devbox.example.com", got)
 	}
 }
 
@@ -231,11 +241,11 @@ func TestInitialListBytes_ReturnsAliasLoadError(t *testing.T) {
 	t.Cleanup(func() { loadAllLiveFn = oldLoadAllLive })
 	loadAllLiveFn = func(time.Duration) ([]sessions.Session, error) {
 		return []sessions.Session{{
-			ID:      "local",
-			CWD:     filepath.Join("/worktrees", "feat-local"),
-			Summary: "local summary",
+			ID:        "local",
+			CWD:       filepath.Join("/worktrees", "feat-local"),
+			Summary:   "local summary",
 			UpdatedAt: time.Now().UTC(),
-			State:   sessions.StateWorking,
+			State:     sessions.StateWorking,
 		}}, nil
 	}
 
@@ -276,7 +286,9 @@ func TestRunFzfOpts_ShortPreviewKeepsStableFieldPositions(t *testing.T) {
 	for _, want := range []string{
 		"--accept-nth=2",
 		"Repo: %s",
-		"_ {2} {6} {7} {4} {3} {8} {9} {10}",
+		"Remote: %s",
+		"Tmux: %s",
+		"_ {2} {6} {7} {4} {3} {8} {9} {10} {11} {12}",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("fzf argv %q does not contain %q", got, want)

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>tsession</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #1e1e1e;
+      color: #d0d0d0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #status { font-size: 14px; opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <div id="status">Starting tsession&hellip;</div>
+  <script>
+    // The real UI (session list + xterm.js terminal) is served by the
+    // embedded internal/webui server started from Wails' startup hook.
+    // The native asset server publishes the web UI's ready port at
+    // "/tsession-port" so this loader never needs a Wails Go<->JS runtime
+    // binding to learn where to navigate.
+    (function poll(attempt) {
+      fetch("/tsession-port", { cache: "no-store" })
+        .then(function (resp) {
+          if (!resp.ok) throw new Error("not ready");
+          return resp.json();
+        })
+        .then(function (data) {
+          window.location.replace("http://127.0.0.1:" + data.port + "/");
+        })
+        .catch(function () {
+          if (attempt >= 100) {
+            document.getElementById("status").textContent =
+              "tsession failed to start. Check the native error dialog and try again.";
+            return;
+          }
+          setTimeout(function () { poll(attempt + 1); }, 100);
+        });
+    })(0);
+  </script>
+</body>
+</html>

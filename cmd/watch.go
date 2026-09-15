@@ -38,6 +38,9 @@ func Watch(args []string) error {
 	_ = fs.Parse(args)
 
 	if *daemon && os.Getenv(daemonEnvFlag) == "" {
+		if watcherAlive() {
+			return nil
+		}
 		return spawnDaemon(*interval, *maxAge, *notifyFlag)
 	}
 
@@ -135,7 +138,6 @@ func refresh(interval, maxAge time.Duration, notifyEnabled bool) error {
 			fmt.Fprintln(os.Stderr, "warning: notify failed:", err)
 		}
 	}
-
 	return cache.Write(cache.File{
 		UpdatedAt: time.Now().UTC(),
 		Interval:  interval,

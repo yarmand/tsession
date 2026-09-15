@@ -58,6 +58,33 @@ func TestResolveTmuxByPID_NoMatchLeavesEmpty(t *testing.T) {
 	}
 }
 
+// TestResolveTmuxByPID_WebGroupedPaneNeverWins documents the invariant that
+// protects against the tmux hazard found while designing `tsession serve`:
+// `tmux list-panes -a` reports the *same* pane PID under both a real session
+// and any grouped `tsession-web-*` session attached to it. tmux/tmux.go's
+// pane listers filter those synthetic sessions out before this function ever
+// sees them, so even if a caller forgot to filter and passed a web-grouped
+// pane through, the real session's own pane (appearing earlier in listing
+// order here) must still win — a web-grouped duplicate must never overwrite
+// it.
+func TestResolveTmuxByPID_WebGroupedPaneNeverWins(t *testing.T) {
+	sess := []Session{{ID: "alpha"}}
+	sd := []StateDirInfo{{ID: "alpha", PID: 400}}
+	panes := []tmux.Pane{
+		{SessionName: "real-session", WindowIndex: "0", PaneIndex: "0", PID: 400},
+		{SessionName: "tsession-web-abc123def456", WindowIndex: "0", PaneIndex: "0", PID: 400},
+	}
+	ppid := map[int]int{400: 1}
+
+	got := ResolveTmuxByPIDWithTree(sess, sd, panes, ppid)
+	if got[0].TmuxName != "real-session" {
+		t.Errorf("want TmuxName=real-session, got %q", got[0].TmuxName)
+	}
+	if got[0].TmuxTarget != "real-session:0.0" {
+		t.Errorf("want TmuxTarget=real-session:0.0, got %q", got[0].TmuxTarget)
+	}
+}
+
 func TestParseProcessTree(t *testing.T) {
 	in := "  100   1\n  200 100\n  badline\n  300 200\n"
 	got := parseProcessTree(in)

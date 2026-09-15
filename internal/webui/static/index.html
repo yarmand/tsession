@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tsession</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#181818">
+<link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="icon" href="/icons/icon-512.png" sizes="512x512" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="tsession">
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<button id="sessions-toggle" type="button" aria-label="Hide session list" title="Hide session list (Alt+H)">&#9776;</button>
+<div id="app">
+  <aside id="sessions">
+    <div id="sessions-hint">Alt+/ focus &middot; Alt+H hide &middot; &uarr;&darr; move &middot; &crarr; attach</div>
+    <ul id="session-list"></ul>
+    <section id="session-info" aria-label="Selected session information">
+      <div class="info-empty">Select a session to inspect.</div>
+    </section>
+    <div id="sessions-resize" role="separator" aria-orientation="vertical" aria-label="Resize session list"></div>
+  </aside>
+  <main id="terminal-pane">
+    <div id="terminal-banner" class="hidden"></div>
+    <div id="terminal"></div>
+    <div id="empty-state">Select a session to attach.</div>
+  </main>
+</div>
+
+<div id="rename-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2 id="rename-modal-title">Rename session</h2>
+    <input id="rename-input" type="text" autocomplete="off">
+    <div class="modal-actions">
+      <button id="rename-cancel">Cancel</button>
+      <button id="rename-save">Save</button>
+    </div>
+    <div id="rename-error" class="error hidden"></div>
+  </div>
+</div>
+
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

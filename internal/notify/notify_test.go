@@ -190,6 +190,60 @@ func sess(id string, st sessions.State) sessions.Session {
 	return sessions.Session{ID: id, Name: id, State: st}
 }
 
+// TestProcessWithStore_IsolatedFromDefaultStore verifies the reason
+// ProcessWithStore exists: the web UI's browser-notification path must use
+// its own snapshot and lock so it cannot silently consume a transition that
+// the default (desktop-notification) path was about to report, or vice
+// versa. Two independent stores observing the same transition must each fire
+// once — not zero, not shared.
+func TestProcessWithStore_IsolatedFromDefaultStore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	calls := withCaptureFire(t)
+	webPath := filepath.Join(t.TempDir(), "notify-web.json")
+
+	// Establish prior sightings on both stores so the done transition below
+	// isn't the silent first-sighting case for either one.
+	_ = Process([]sessions.Session{sess("a", sessions.StateWorking)})
+	_ = ProcessWithStore([]sessions.Session{sess("a", sessions.StateWorking)}, webPath)
+
+	// Both observers see the same transition independently.
+	if err := Process([]sessions.Session{sess("a", sessions.StateDone)}); err != nil {
+		t.Fatalf("default store Process: %v", err)
+	}
+	if err := ProcessWithStore([]sessions.Session{sess("a", sessions.StateDone)}, webPath); err != nil {
+		t.Fatalf("web store ProcessWithStore: %v", err)
+	}
+
+	if len(*calls) != 2 {
+		t.Fatalf("independent stores must each fire once (2 total), got %d: %v", len(*calls), *calls)
+	}
+
+	// Re-running against either store alone must not refire — each store's
+	// own snapshot correctly recorded the transition.
+	if err := Process([]sessions.Session{sess("a", sessions.StateDone)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProcessWithStore([]sessions.Session{sess("a", sessions.StateDone)}, webPath); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("no-change re-run must not refire, got %d: %v", len(*calls), *calls)
+	}
+}
+
+// TestProcessWithStore_CreatesParentDir verifies the web store's directory
+// (which may not yet exist, e.g. before ~/.tsession/notify-web.json is ever
+// written) is created rather than failing.
+func TestProcessWithStore_CreatesParentDir(t *testing.T) {
+	snapPath := filepath.Join(t.TempDir(), "nested", "dir", "notify-web.json")
+	if err := ProcessWithStore([]sessions.Session{sess("a", sessions.StateDone)}, snapPath); err != nil {
+		t.Fatalf("ProcessWithStore: %v", err)
+	}
+	if _, err := os.Stat(snapPath); err != nil {
+		t.Fatalf("expected snapshot file to exist: %v", err)
+	}
+}
+
 func TestProcessFirstSightingDoesNotFire(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	calls := withCaptureFire(t)
@@ -314,5 +368,93 @@ func TestProcessDedupesIdenticalFireErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "2 notification(s)") {
 		t.Fatalf("error should report the failure count, got %q", err.Error())
+	}
+}
+
+// TestDiffWithStore_NeverFiresDesktopNotification verifies the web SSE path's
+// core guarantee: DiffWithStore must not invoke the macOS-only fireFunc at
+// all, even though it detects the same transitions ProcessWithStore would.
+func TestDiffWithStore_NeverFiresDesktopNotification(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	prev := fireFunc
+	fireCalls := 0
+	fireFunc = func(title, sound string) error {
+		fireCalls++
+		return nil
+	}
+	t.Cleanup(func() { fireFunc = prev })
+
+	dir := t.TempDir()
+	snapPath := dir + "/notify-web.json"
+
+	if _, err := DiffWithStore([]sessions.Session{sess("a", sessions.StateWorking)}, snapPath); err != nil {
+		t.Fatalf("first sighting: %v", err)
+	}
+	events, err := DiffWithStore([]sessions.Session{sess("a", sessions.StateDone)}, snapPath)
+	if err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d: %+v", len(events), events)
+	}
+	if events[0].Kind != "done" || events[0].SessionID != "a" {
+		t.Fatalf("unexpected event: %+v", events[0])
+	}
+	if events[0].Label != "a" {
+		t.Fatalf("expected label %q, got %q", "a", events[0].Label)
+	}
+	if fireCalls != 0 {
+		t.Fatalf("DiffWithStore must never call fireFunc, got %d calls", fireCalls)
+	}
+}
+
+// TestDiffWithStore_NoRefireWhileSameState mirrors the desktop path's
+// debounce guarantee: staying in "done" across polls must not repeat the
+// event on every call.
+func TestDiffWithStore_NoRefireWhileSameState(t *testing.T) {
+	dir := t.TempDir()
+	snapPath := dir + "/notify-web.json"
+
+	if _, err := DiffWithStore([]sessions.Session{sess("a", sessions.StateWorking)}, snapPath); err != nil {
+		t.Fatalf("first sighting: %v", err)
+	}
+	events, err := DiffWithStore([]sessions.Session{sess("a", sessions.StateDone)}, snapPath)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("expected 1 event on transition, got %d events, err=%v", len(events), err)
+	}
+	events, err = DiffWithStore([]sessions.Session{sess("a", sessions.StateDone)}, snapPath)
+	if err != nil {
+		t.Fatalf("second poll: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected no re-fire while state is unchanged, got %+v", events)
+	}
+}
+
+// TestDiffWithStore_IsolatedFromProcessWithStore verifies that DiffWithStore
+// and ProcessWithStore, pointed at different snapshot paths, each observe
+// the same transition independently.
+func TestDiffWithStore_IsolatedFromProcessWithStore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dir := t.TempDir()
+	webSnap := dir + "/notify-web.json"
+
+	if err := ProcessWithStore([]sessions.Session{sess("a", sessions.StateWorking)}, dir+"/desktop.json"); err != nil {
+		t.Fatalf("desktop first sighting: %v", err)
+	}
+	if _, err := DiffWithStore([]sessions.Session{sess("a", sessions.StateWorking)}, webSnap); err != nil {
+		t.Fatalf("web first sighting: %v", err)
+	}
+
+	if err := ProcessWithStore([]sessions.Session{sess("a", sessions.StateDone)}, dir+"/desktop.json"); err != nil {
+		t.Fatalf("desktop transition: %v", err)
+	}
+	events, err := DiffWithStore([]sessions.Session{sess("a", sessions.StateDone)}, webSnap)
+	if err != nil {
+		t.Fatalf("web transition: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected the web store to independently observe the transition, got %+v", events)
 	}
 }

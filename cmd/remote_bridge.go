@@ -10,6 +10,7 @@ import (
 
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/shellutil"
 	"github.com/yarma/tsession/internal/tmux"
 )
 
@@ -51,12 +52,7 @@ func remoteFallbackTmuxName(sessionID string) string {
 }
 
 func remoteCopilotResolverCommand() string {
-	probe := "exec /bin/sh -c " + shellQuote("command -v copilot")
-	return `remote_shell=${SHELL:-/bin/sh}; ` +
-		`case "${remote_shell##*/}" in csh|tcsh) shell_flags=-ic ;; *) shell_flags=-lic ;; esac; ` +
-		`copilot_bin=$("$remote_shell" "$shell_flags" ` + shellQuote(probe) + ` 2>/dev/null | tail -n 1); ` +
-		`case "$copilot_bin" in /*) ;; *) echo 'copilot resolver did not return an absolute path' >&2; exit 127 ;; esac; ` +
-		`if [ ! -x "$copilot_bin" ]; then echo 'copilot not found in remote interactive shell PATH' >&2; exit 127; fi; `
+	return shellutil.CopilotResolverCommand()
 }
 
 func remoteResumeCommand(sessionID string) string {
@@ -96,10 +92,11 @@ func remoteBridgeCommand(s sessions.Session, r config.Remote) (string, []string,
 	switch r.Type {
 	case "", "ssh", "codespace":
 		bin, args := r.ResumeCommand()
-		return bin, append(args, "bash -lc "+shellQuote(remoteCommand)), nil
+		command := shellutil.InteractiveLoginCommand(remoteCommand)
+		return bin, append(args, "sh -c "+shellQuote(command)), nil
 	case "devcontainer":
 		bin, args := r.ResumeCommand()
-		return bin, append(args, "bash", "-lc", remoteCommand), nil
+		return bin, append(args, "sh", "-c", shellutil.InteractiveLoginCommand(remoteCommand)), nil
 	default:
 		return "", nil, fmt.Errorf("unsupported remote type %q", r.Type)
 	}
@@ -131,9 +128,5 @@ func ensureRemoteBridge(s sessions.Session, r config.Remote) (string, error) {
 }
 
 func shellJoin(args []string) string {
-	quoted := make([]string, len(args))
-	for i, arg := range args {
-		quoted[i] = shellQuote(arg)
-	}
-	return strings.Join(quoted, " ")
+	return shellutil.Join(args)
 }

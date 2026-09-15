@@ -1,132 +1,270 @@
 # tsession
 
-A session navigator for [Copilot CLI](https://github.com/github/copilot-cli) and [pi](https://github.com/earendil-works/pi-mono) — browse, switch, and monitor your AI coding sessions from tmux.
+**A local and remote session manager for agentic work—built on tmux and Git
+worktrees, not a closed agent runtime.**
 
-## Install
+There are plenty of agent session managers. `tsession` takes a deliberately
+open approach: keep using the terminal, agent tools, repositories, and remote
+machines you already have. Run agents inside ordinary tmux sessions and Git
+worktrees; `tsession` discovers them, shows their state in one place, and lets
+you reconnect without forcing every session through a proprietary launcher.
 
-Requires Go 1.25+, `tmux`, `fzf`, `lsof`.
+Today, `tsession` has explicit integrations for
+[Copilot CLI](https://github.com/github/copilot-cli) and
+[pi](https://github.com/earendil-works/pi-mono). Its foundation—tmux for
+long-lived processes and worktrees for isolated branches—keeps the workflow
+independent of any single agent tool.
+
+Remote work is first-class. Local sessions and sessions on SSH hosts appear in
+the same dashboard, with support for exact remote tmux pane discovery and
+browser-based attachment that avoids tmux-in-tmux. GitHub Codespaces and Docker
+devcontainers are supported as additional transports.
+
+## Why tsession?
+
+- **Use the tools you want.** Start an agent yourself or use `tsession new` as
+  a convenience; discovery does not depend on `tsession` owning the process.
+- **Keep durable terminal sessions.** tmux remains the process and terminal
+  substrate, so sessions survive disconnects and remain directly accessible.
+- **Isolate work with Git worktrees.** Give each agent a branch and working
+  directory without cloning the repository repeatedly.
+- **See local and remote work together.** Monitor session state across your
+  machine, SSH hosts, Codespaces, and devcontainers.
+- **Choose your interface.** Use the native GUI, a browser/PWA, a persistent
+  terminal navigator, a tmux popup, or plain JSON output.
+- **Avoid lock-in.** The repositories, worktrees, tmux sessions, and agent
+  state remain usable without the UI.
+
+## Quick start
+
+### 1. Install
+
+Build and install the CLI and native GUI from source:
 
 ```bash
-make install    # builds and installs to ~/.local/bin/tsession
+make install
 ```
 
-## Browse — session navigation in a terminal split
+The default installation directory is `~/.local/bin`:
 
-The primary workflow: use your terminal's native split to create two panes side by side. The left pane runs tsession as a persistent navigator; the right pane has a tmux client where your sessions live.
+- macOS: `tsession` and `TSession.app`
+- Linux: `tsession` and `TSession`
+- Windows: `tsession` and `TSession.exe`
 
-![browse](browse.png)
+Override it with:
 
-Before starting tsession, create a native terminal split. Start or attach a tmux
-session in the split that will display sessions, then run this in the navigation
-split:
+```bash
+make install PREFIX=/path/to/bin
+```
+
+Source builds require Go 1.25+, `tmux`, `fzf`, `lsof`, the Wails v2 CLI, and
+the platform webview dependencies described in [gui/README.md](gui/README.md).
+Use `make gui` to build the GUI without installing it.
+
+### 2. Open the dashboard
+
+Launch the native application:
+
+```bash
+tsession gui
+```
+
+Or run the same interface in a browser:
+
+```bash
+tsession serve --open
+```
+
+![tsession GUI](browse-GUI.png)
+
+The dashboard combines local and remote sessions in one list. Each row shows
+the agent source, state, repository/worktree, age, and local or remote origin.
+Selecting a session opens its tmux terminal in the main pane.
+
+Useful controls:
+
+| Control | Action |
+|---|---|
+| `Alt+/` | Toggle focus between the session list and terminal |
+| `Alt+H` | Collapse or restore the session list |
+| `↑` / `↓` | Move through the focused session list |
+| `Enter` | Open the highlighted session |
+| `F2` | Rename the selected session |
+| Top-left button | Collapse or restore the session list |
+| Drag the list edge | Resize the session list; the width is remembered |
+
+When the list is collapsed, `Alt+/` opens it as an overlay without resizing
+the terminal. Selecting a session closes the overlay automatically. Remote
+origins receive distinct colors so sessions from different hosts remain easy
+to identify.
+
+### 3. Add an SSH host
+
+Create `~/.config/tsession/config.yaml`:
+
+```yaml
+remotes:
+  - name: devbox
+    host: devbox.example.com
+```
+
+Restart or refresh the dashboard. Active sessions from `devbox` will appear
+beside local sessions.
+
+Remote commands initialize the user's configured shell as an interactive login
+shell, matching a normal SSH terminal and loading PATH additions such as
+Homebrew. If `tsession` is already available in that PATH, it is used directly
+without an installation or version check. Otherwise, a matching release is
+installed under `~/.tsession/remote-bin/`.
+
+## How it works
+
+`tsession` merges agent state, tmux topology, repository/worktree identity, and
+configured remote origins into a unified session list.
+
+1. **Agents run normally.** Start Copilot CLI or pi in a tmux pane using your
+   existing commands and configuration.
+2. **Worktrees provide isolation.** A Git worktree gives each task its own
+   branch and working directory. This is recommended, not mandatory.
+3. **Agent state is discovered.** `tsession` reads the supported agent's local
+   state and determines whether it is working, waiting for input, done, idle,
+   or exited.
+4. **Processes are matched to tmux.** The owning agent PID is traced to its
+   tmux pane. A working-directory match is used as a fallback.
+5. **Remotes use the same model.** On an SSH host, the remote `tsession`
+   watcher and active list provide the same tmux-aware session metadata as a
+   local invocation.
+6. **Any front end can attach.** The GUI/browser embeds a terminal; the
+   terminal navigator switches a selected tmux client; plain `list` output is
+   available for scripts.
+
+`tsession new` can create the worktree and tmux session for you, but it is not
+required. Sessions started independently are still discoverable when they use
+a supported agent and run in tmux.
+
+### Supported agent integrations
+
+**Copilot CLI** sessions are discovered from the Copilot session store and
+per-session state directories automatically.
+
+**pi** sessions require the bundled state extension:
+
+```bash
+cp extension/pi/tsession-state.ts ~/.pi/agent/extensions/
+```
+
+Reload or restart pi after installing it. The extension records lifecycle state
+under `~/.tsession/pi-state/`; the agent itself still runs normally in tmux.
+
+## Interfaces
+
+### Native GUI
+
+```bash
+tsession gui
+```
+
+The native Wails application embeds the same loopback web server and UI as
+`tsession serve`. It runs in a native OS window with no browser process to
+manage. The installed application is discovered beside the `tsession` CLI.
+
+See [gui/README.md](gui/README.md) for platform prerequisites and development
+commands.
+
+### Browser UI and PWA
+
+```bash
+tsession serve
+tsession serve --open
+```
+
+The server binds to `127.0.0.1:4270` by default and rejects non-loopback
+addresses. The UI can also be installed as a PWA from Chrome, Edge, or Safari.
+
+Local sessions attach through a grouped tmux session, giving the browser its
+own terminal size without resizing or stealing another attached client.
+Remote sessions execute the same grouped attach through SSH, Codespaces, or
+Docker.
+
+This is particularly useful for remote work: the browser owns the outer PTY,
+so attaching to a remote tmux session does not create a local-tmux →
+SSH → remote-tmux stack with doubled status bars and conflicting prefix keys.
+
+PTYs stay warm when a browser tab disconnects. Their grouped tmux sessions are
+torn down only when explicitly closed or when the server shuts down.
+
+### Advanced: persistent terminal navigator
+
+For users who prefer a terminal-only workflow, create a native terminal split:
+one side runs the navigator and the other contains the tmux client to switch.
+
+![terminal session navigator](browser-TUI.png)
 
 ```bash
 tsession browse --watch --active --short --target pick
 ```
 
-On first launch, tsession asks you to pick which tmux client to target. If no
-non-navigation client is attached yet, it waits until one appears and then opens
-the picker for confirmation. It always excludes the `session-nav` client.
+On first launch, choose the tmux client that should display selected sessions.
+The navigator excludes its own `session-nav` client. `--watch` refreshes the
+picker every five seconds.
 
-The `--watch` flag keeps the picker open and refreshes every 5 seconds — it acts as a persistent session dashboard. Press `esc` to quit.
+If started outside tmux, `browse` creates a `session-nav` tmux session and
+re-runs itself inside it.
 
-If started outside tmux, browse auto-creates a tmux session named `session-nav` and re-runs inside it.
+Terminal picker keys:
 
-## Popup — quick switcher from any tmux pane
+| Key | Action |
+|---|---|
+| `Enter` | Switch to the selected session |
+| `Ctrl+E` | Open the session directory in VS Code |
+| `Ctrl+N` | Rename the session |
+| `Ctrl+A` | Rename the repository |
+| `Ctrl+R` | Reload the list |
+| `?` | Show help in the preview pane |
+| `Esc` / `Q` | Exit |
 
-For quick access without a dedicated split, bind tsession as a tmux popup:
+### Advanced: tmux popup
 
-![popup](popup.png)
+![tmux popup](popup.png)
 
-Add to `~/.tmux.conf`:
+Add a shortcut to `~/.tmux.conf`:
 
 ```tmux
 bind -n M-s display-popup -E -w 90% -h 70% "tsession popup --active --short"
 ```
 
-Then `Alt-s` opens the picker as an overlay from any pane. Select a session and the popup closes, switching you there.
+`Alt+S` opens the picker over the current pane. Selecting a session closes the
+popup and switches to it.
 
-## Keybindings
-
-| Key | Action |
-|-----|--------|
-| `enter` | Switch to the selected session |
-| `ctrl-e` | Open session directory in VS Code |
-| `ctrl-n` | Rename session |
-| `ctrl-a` | Rename repository |
-| `ctrl-r` | Reload the session list |
-| `?` | Show help in the preview pane |
-| `esc`/`q` | Exit the picker |
-
-## Source indicators
-
-| Prefix | Source |
-|--------|--------|
-| © | Copilot CLI |
-| π | pi |
-
-## State indicators
-
-| Glyph | Meaning |
-|-------|---------|
-| ● | Agent is processing |
-| ◐ | Agent finished with a question |
-| ✓ | Agent finished (cleared on pane switch) |
-| ○ | Waiting for user input |
-| · | Idle or exited |
-
-## Notifications
-
-Pass `--notify` to `watch`, `list`, or `browse` to get a macOS notification the
-moment an agent finishes (`done`, sound "Tink") or asks a question (`question`,
-sound "Funk"). The most common setups are:
+### Scripts and integrations
 
 ```bash
-tsession watch --daemon --notify     # background daemon (recommended)
-tsession browse --watch --notify     # while browsing
+tsession list
+tsession list --active
+tsession list --active --json
 ```
 
-State is tracked in `~/.tsession/notify.json`; the first observation of each
-session is recorded silently so you are not flooded on startup. Notifications
-fire only while a long-running observer (`watch --daemon` or `browse --watch`)
-is running. macOS only — a no-op on other platforms.
+`--json` emits the discovered session records as machine-readable JSON.
+`--fzf` emits the tab-delimited format used by the terminal navigator.
 
----
-See [AGENTS.md](AGENTS.md) for technical internals, full flag reference, and cache architecture.
+## Creating sessions and worktrees
 
-
-| Glyph | State    | Meaning                                                                |
-|-------|----------|------------------------------------------------------------------------|
-| ●     | working  | last event was `tool.execution_start` (non-prompting tool) / `agent.processing` |
-| ◐     | question | last event was `tool.execution_start` for `ask_user`/`ask_question`, or a permission request |
-| ✓     | done     | session just transitioned from `working` to `active`; cleared the first time you switch to its tmux pane |
-| ○     | active   | `session.db` held open by a live copilot process                       |
-| ·     | idle     | no live process, no shutdown event                                     |
-| ·     | exited   | `session.shutdown` event in `events.jsonl`                             |
-
-## Creating Sessions
-
-Create a fresh worktree and start a Copilot session in it:
+Create a worktree and start Copilot CLI inside a matching tmux session:
 
 ```bash
-tsession new my-feature                 # creates a worktree for branch my-feature
-tsession new --path ~/src/repo.wt/foo   # use an existing worktree
-tsession new my-feature -- --resume     # forward args after -- to copilot
+tsession new my-feature
+tsession new --path ~/src/repo.worktrees/existing
+tsession new my-feature -- --resume
 ```
 
-`new` creates (or reuses) a git worktree, opens a tmux session named after the
-worktree directory, and launches `copilot` inside it, then switches/attaches you
-to that session.
+Anything after `--` is forwarded to Copilot CLI.
 
-### Configuring worktree creation
+The worktree creation command is configurable in
+`~/.config/tsession/new-worktree.sh`. The script receives the requested branch
+name as `$1` and must print the final worktree path as the last line of stdout.
+It is created with this default:
 
-The commands used to create the worktree live in
-`~/.config/tsession/new-worktree.sh`, auto-created with defaults on first run.
-The script receives the branch name as `$1` and must print the resulting
-worktree path as the **last line of stdout**. Edit it freely to match your
-workflow. The default:
-
-```sh
+```bash
 #!/usr/bin/env bash
 set -euo pipefail
 repo_root="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
@@ -137,129 +275,205 @@ git worktree add -b "$USER/$1" "$wt_path"
 echo "$wt_path"
 ```
 
-## Remote Sessions
+Edit the script freely to match your branch naming and worktree layout.
 
-Display Copilot CLI sessions running on remote machines alongside your local
-sessions.
+## Remote session management
 
-### Setup
+SSH is the primary remote transport. GitHub Codespaces and Docker
+devcontainers use the same discovery and attachment model.
 
-Create `~/.config/tsession/config.yaml`:
+### Configuration
 
 ```yaml
 remotes:
-  # Plain SSH remote
+  # SSH host or ssh-config alias
   - name: devbox
-    host: devbox.local
-    active: true
+    host: devbox.example.com
 
-  # SSH with custom path
-  - name: server
-    host: user@server.example.com
-    copilot_dir: /home/user/.copilot
-
-  # Keep configured but disable temporarily
-  - name: offline-lab
-    host: offline.example.com
-    active: false
+  # SSH with a custom command
+  - name: lab
+    host: user@lab.example.com
+    ssh_command: ssh -J bastion
 
   # GitHub Codespace
-  - name: my-codespace
+  - name: codespace
     type: codespace
     codespace: urban-broccoli-abc123
 
-  # Dev container (Docker)
-  - name: my-container
+  # Docker devcontainer
+  - name: container
     type: devcontainer
     container: myapp_devcontainer
     user: vscode
 
-  # Custom SSH command (advanced)
-  - name: custom
-    ssh_command: my-ssh-wrapper
-    host: target-host
+  # Keep a remote configured but temporarily disabled
+  - name: offline
+    host: offline.example.com
+    active: false
 ```
-
-#### Remote types
-
-| Type | Fields | Connect command |
-|------|--------|----------------|
-| `ssh` (default) | `host`, optional `ssh_command` | `ssh <host> ...` |
-| `codespace` | `codespace` (name) | `gh codespace ssh --codespace <name> ...` |
-| `devcontainer` | `container`, `user` | `docker exec -u <user> <container> ...` |
-
-#### All fields
 
 | Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `name` | yes | — | Label shown in the section header |
-| `active` | no | `true` | Whether this remote is used. Set `false` to keep it configured but skipped. |
-| `type` | no | `ssh` | Remote type: `ssh`, `codespace`, or `devcontainer` |
-| `host` | type=ssh | — | SSH destination (user@host or ssh-config alias) |
-| `ssh_command` | no | `ssh` | Custom SSH binary/command (type=ssh only) |
-| `codespace` | type=codespace | — | Codespace name (from `gh codespace list`) |
-| `container` | type=devcontainer | — | Docker container name |
-| `user` | type=devcontainer | — | User inside the container (e.g. `vscode`) |
-| `copilot_dir` | no | `~/.copilot` | Path to Copilot state on the remote |
+|---|---|---|---|
+| `name` | Yes | — | Label and color identity shown in the UI |
+| `active` | No | `true` | Whether the remote participates in discovery |
+| `type` | No | `ssh` | `ssh`, `codespace`, or `devcontainer` |
+| `host` | SSH | — | SSH destination or ssh-config alias |
+| `ssh_command` | No | `ssh` | Custom SSH command, options, or wrapper |
+| `codespace` | Codespace | — | Codespace name |
+| `container` | Devcontainer | — | Docker container name |
+| `user` | No | — | User passed to `docker exec` |
+### Remote discovery
 
-**Requirements on the remote:**
-- `bash` and `sqlite3` must be available in PATH
-- `tmux` (optional — enables pane-level matching)
-- SSH must be configured for passwordless access (key-based auth)
+For each enabled remote, `tsession`:
 
-### How it works
+1. Connects through the configured transport.
+2. Initializes the configured user shell as an interactive login shell so
+   Homebrew and other PATH setup is available.
+3. Uses `tsession` from PATH when present; otherwise installs a matching
+   release under `~/.tsession/remote-bin/<version>/tsession`.
+4. Ensures `tsession watch --daemon` is running.
+5. Reads `tsession list --active --local-only --json`.
+6. Preserves the remote tmux session and exact pane target in the local
+   dashboard.
 
-`tsession` installs the matching release binary under
-`~/.tsession/remote-bin/<version>/tsession` and requests a one-shot JSON
-snapshot through the configured transport. Remote tmux is optional; when
-available, the snapshot includes exact pane targets. Each remote appears as its
-own section:
+The same remote metadata is available in the GUI/browser information panel and
+the terminal picker's preview.
 
+### Remote attachment
+
+- **GUI/browser:** runs a grouped tmux attach over the configured transport.
+  The browser terminal avoids nesting a local tmux client around the remote
+  tmux client.
+- **Terminal navigator:** creates or reuses a local bridge tmux session named
+  `tsession-r-<remote>-<id-hash>` and runs the remote attach inside it.
+- **Missing exact target:** if tmux is available but no usable target is
+  discovered, `tsession` can create a deterministic fallback tmux session and
+  resume Copilot CLI.
+- **No remote tmux:** the fallback runs Copilot CLI resume directly.
+
+Remote requests time out independently, so an unreachable host does not block
+local sessions or other remotes.
+
+### SSH troubleshooting
+
+- Ensure passwordless SSH works from the same account running `tsession`.
+- If Homebrew provides `tmux` or `tsession`, confirm it appears in an
+  interactive login shell:
+
+  ```bash
+  ssh -t devbox '$SHELL -lic "command -v tmux; command -v tsession"'
+  ```
+- Configure SSH `ControlMaster`/`ControlPersist` to reduce repeated connection
+  latency.
+- Run `tsession list --active` directly on the remote to inspect its local
+  agent-to-tmux matching.
+
+## Session state and identity
+
+### Agent sources
+
+| Prefix | Source |
+|---|---|
+| © | Copilot CLI |
+| π | pi |
+
+### States
+
+| Glyph | State | Meaning |
+|---|---|---|
+| ● | `working` | The agent is processing or executing tools |
+| ◐ | `question` | The agent is waiting for user input or permission |
+| ✓ | `done` | The agent has just finished; cleared when the pane is selected |
+| ○ | `active` | A live session is waiting for input |
+| · | `idle` | No live process is currently attached |
+| · | `exited` | The session emitted a shutdown event |
+
+### Names and repository aliases
+
+Use `Ctrl+N` in the terminal picker, `F2` in the GUI, or:
+
+```bash
+tsession rename <session-id> [name]
 ```
-── Local ──────────────────────────────────────────────────────────
-  ● working  2m  tsession    Fix browse layout
-  ○ active   1h  myproject   Add auth module
-── devbox ─────────────────────────────────────────────────────────
-  ● working  5m  backend     Implement caching
-  · idle     3h  infra       Terraform refactor
+
+Session names are stored in `~/.tsession/names.json`. When a matching local
+tmux session exists, it is renamed too.
+
+Use `Ctrl+A` in the terminal picker, the repository context action in the GUI,
+or:
+
+```bash
+tsession rename-repo <session-id> [alias]
 ```
 
-### Remote display behavior
+Repository aliases are stored in `~/.tsession/repo-names.json` and are shared
+across worktrees for the same repository.
 
-Selecting a remote session creates or reuses a local tmux bridge named
-`tsession-r-<remote>-<id-hash>`. Only the selected `--target` client switches to
-that bridge; the navigation client remains in `session-nav`.
+## Cache and notifications
 
-- If the remote session already has a live tmux target, the bridge attaches to it.
-- If remote tmux exists without a usable target, tsession creates or reuses a
-  deterministic remote tmux session running `copilot --resume`.
-- If remote tmux is unavailable, the bridge runs `copilot --resume` directly.
+Start the background cache watcher for faster repeated list rendering:
 
-The local bridge uses `remain-on-exit`, so a disconnected transport leaves its
-last output visible. Select the remote session again to reconnect the same
-bridge.
+```bash
+tsession watch --daemon
+tsession watch --daemon --interval=5s
+tsession stop-watch
+```
 
-### Flags
+The watcher writes `~/.tsession/cache.json`. Fresh cache reads complete without
+re-querying every local and remote source; stale or missing caches fall back to
+live discovery. Use `tsession list --no-cache` to force a live read.
 
-| Flag           | Description                                        |
-|----------------|----------------------------------------------------|
-| `--local-only` | Skip remote gathering (useful offline or for speed) |
+On macOS, `--notify` fires a desktop notification when a session enters
+`done` or `question`:
 
-### Caching
+```bash
+tsession watch --daemon --notify
+tsession browse --watch --notify
+```
 
-When `tsession watch` is running, remote data is gathered alongside local data
-on each refresh cycle. Each remote has a 10-second timeout — unreachable hosts
-are skipped with a warning without blocking the local cache update.
+The first observation is recorded silently to avoid a notification flood.
+Desktop notification state is stored in `~/.tsession/notify.json`; browser
+notifications maintain an independent snapshot.
 
-### Troubleshooting
+## Command reference
 
-- **Remote unreachable:** The section shows as
-  `── devbox (unreachable) ──` and local sessions work normally.
-- **sqlite3 not found:** The remote is skipped. Install `sqlite3` on the remote.
-- **Slow SSH:** Ensure `ControlMaster` is configured in `~/.ssh/config` for
-  persistent connections. The gather script completes in <1s on most hosts.
+```text
+tsession list [flags]
+tsession new <branch> [-- copilot-args]
+tsession new [-p|--path <dir>] [-- copilot-args]
+tsession browse [flags] [query]
+tsession popup [flags]
+tsession resume [--target=...] <session-id>
+tsession rename <session-id> [name]
+tsession rename-repo <session-id> [alias]
+tsession vscode <session-id>
+tsession watch [--daemon]
+tsession stop-watch
+tsession serve [--addr] [--open]
+tsession gui
+```
 
-## Releases
+Common list/browse/popup flags:
+
+| Flag | Description |
+|---|---|
+| `--max-age <duration>` | Ignore sessions older than the duration; default `336h` |
+| `--active` | Show sessions with meaningful live state and tmux availability |
+| `--short` | Compact state/repository/summary/age rendering |
+| `--lshort <n>` | Compact rendering truncated to `n` characters |
+| `--local-only` | Skip configured remotes |
+| `--no-cache` | Force live discovery (`list` only) |
+| `--no-color` | Disable ANSI colors (`list` only) |
+| `--json` | Emit JSON (`list` only) |
+| `--fzf` | Emit tab-delimited picker data (`list` only) |
+| `--watch` | Refresh the terminal browser every five seconds (`browse` only) |
+| `--target <value>` | Select the tmux client to switch (`browse`/`resume`) |
+| `--notify` | Process macOS done/question notifications |
+
+For implementation details, data sources, state transitions, and package
+architecture, see [AGENTS.md](AGENTS.md).
+
+## Maintainer: publishing releases
 
 Push a version tag (`vX.Y.Z`) to trigger `.github/workflows/release.yml`.
 The workflow cross-compiles and publishes:
@@ -269,6 +483,5 @@ The workflow cross-compiles and publishes:
 - `tsession_<tag>_darwin_arm64.tar.gz`
 
 Each archive contains a single `tsession` binary. Assets are attached to the
-GitHub release for that tag, so tools can fetch an exact tag's asset directly
-or fall back to the latest release when resolving a binary for the current
-platform.
+GitHub release so remote installation can resolve an exact tag or fall back to
+the latest compatible release.

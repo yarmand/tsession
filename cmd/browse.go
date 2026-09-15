@@ -10,6 +10,7 @@ import (
 
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/shellutil"
 	"github.com/yarma/tsession/internal/tmux"
 )
 
@@ -204,8 +205,8 @@ Keybindings:
 	}
 	if useShort {
 		fzfArgs = append(fzfArgs,
-			"--preview-window=down:12:wrap",
-			`--preview=sh -c 'legend=$(printf "%b" "$7"); origin=$(printf "%b" "$8"); origins=$origin; if [ -n "$legend" ]; then origins=$legend; fi; if [ -z "$origins" ]; then origins=local; fi; printf "ID: %s\nState: %s\nAge: %s\nCWD: %s\nRepo: %s\n\n%s\n\nOrigins:\n%s\n" "$1" "$2" "$3" "$4" "$5" "$6" "$origins"' _ {2} {6} {7} {4} {3} {8} {9} {10}`,
+			"--preview-window=down:14:wrap",
+			`--preview=sh -c 'legend=$(printf "%b" "$7"); origin=$(printf "%b" "$8"); origins=$origin; if [ -n "$legend" ]; then origins=$legend; fi; if [ -z "$origins" ]; then origins=local; fi; remote=$9; if [ -z "$remote" ]; then remote=local; fi; tmux=${10}; if [ -z "$tmux" ]; then tmux="(none)"; fi; printf "ID: %s\nState: %s\nAge: %s\nCWD: %s\nRepo: %s\nRemote: %s\nTmux: %s\n\n%s\n\nOrigins:\n%s\n" "$1" "$2" "$3" "$4" "$5" "$remote" "$tmux" "$6" "$origins"' _ {2} {6} {7} {4} {3} {8} {9} {10} {11} {12}`,
 		)
 	}
 	autoIn5s := autoReload && !popup
@@ -325,5 +326,5 @@ func resumeBindingCommand(self, target string) string {
 // shellQuote wraps s in single quotes, escaping any embedded single quotes,
 // so that it is safe to embed in shell commands executed by fzf bindings.
 func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return shellutil.Quote(s)
 }

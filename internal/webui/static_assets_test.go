@@ -91,6 +91,59 @@ func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {
 	}
 }
 
+func TestStaticAssets_SessionRowsShowLocalOrRemoteLocation(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	for path, want := range map[string]string{
+		"/app.js":  "function remoteColors()",
+		"/app.css": ".session-row .location.remote",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", path, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("GET %s: body missing %q", path, want)
+		}
+	}
+}
+
+func TestStaticAssets_SessionListCanCollapseAndOverlay(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	for path, wants := range map[string][]string{
+		"/": {`id="sessions-toggle"`, `id="sessions-resize"`, "Alt+H hide"},
+		"/app.js": {
+			`ev.code === "KeyH"`,
+			"sidebarOverlay",
+			"function toggleSidebar()",
+			`sessionsResize.addEventListener("pointerdown"`,
+			`localStorage.setItem(SIDEBAR_WIDTH_KEY`,
+		},
+		"/app.css": {
+			"#app.sidebar-collapsed",
+			"#app.sidebar-collapsed.sidebar-overlay #sessions",
+			"flex: 1 1 auto",
+			"#sessions-resize",
+			"position: fixed",
+		},
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", path, rec.Code)
+		}
+		for _, want := range wants {
+			if !strings.Contains(rec.Body.String(), want) {
+				t.Fatalf("GET %s: body missing %q", path, want)
+			}
+		}
+	}
+}
+
 func TestStaticAssets_ServiceWorkerPrefersFreshShellAssets(t *testing.T) {
 	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)

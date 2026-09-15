@@ -92,10 +92,11 @@ func remoteBridgeCommand(s sessions.Session, r config.Remote) (string, []string,
 	switch r.Type {
 	case "", "ssh", "codespace":
 		bin, args := r.ResumeCommand()
-		return bin, append(args, "bash -lc "+shellQuote(remoteCommand)), nil
+		command := shellutil.InteractiveLoginCommand(remoteCommand)
+		return bin, append(args, "sh -c "+shellQuote(command)), nil
 	case "devcontainer":
 		bin, args := r.ResumeCommand()
-		return bin, append(args, "bash", "-lc", remoteCommand), nil
+		return bin, append(args, "sh", "-c", shellutil.InteractiveLoginCommand(remoteCommand)), nil
 	default:
 		return "", nil, fmt.Errorf("unsupported remote type %q", r.Type)
 	}

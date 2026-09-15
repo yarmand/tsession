@@ -76,10 +76,11 @@ func wrapInTransport(s sessions.Session, r config.Remote, script string) (string
 	switch r.Type {
 	case "", "ssh", "codespace":
 		bin, args := r.ResumeCommand()
-		return bin, append(args, "bash -lc "+shellutil.Quote(script)), nil
+		command := shellutil.InteractiveLoginCommand(script)
+		return bin, append(args, "sh -c "+shellutil.Quote(command)), nil
 	case "devcontainer":
 		bin, args := r.ResumeCommand()
-		return bin, append(args, "bash", "-lc", script), nil
+		return bin, append(args, "sh", "-c", shellutil.InteractiveLoginCommand(script)), nil
 	default:
 		return "", nil, fmt.Errorf("attachcmd: unsupported remote type %q", r.Type)
 	}

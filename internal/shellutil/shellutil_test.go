@@ -35,6 +35,22 @@ func TestJoin_Empty(t *testing.T) {
 	}
 }
 
+func TestInteractiveLoginCommandUsesConfiguredShell(t *testing.T) {
+	cmd := InteractiveLoginCommand("command -v tmux")
+	for _, want := range []string{
+		`remote_shell=${SHELL:-/bin/sh}`,
+		`csh|tcsh) shell_flags=-ic`,
+		`*) shell_flags=-lic`,
+		`exec "$remote_shell" "$shell_flags"`,
+		`exec /bin/sh -c`,
+		`command -v tmux`,
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("interactive command missing %q:\n%s", want, cmd)
+		}
+	}
+}
+
 func TestCopilotResolverCommand_SetsCopilotBinOnSuccessPath(t *testing.T) {
 	cmd := CopilotResolverCommand()
 	if cmd == "" {
@@ -43,7 +59,7 @@ func TestCopilotResolverCommand_SetsCopilotBinOnSuccessPath(t *testing.T) {
 	// The resolver must leave $copilot_bin set for callers to reference, and
 	// must fail loudly (exit 127) rather than silently continuing when
 	// resolution fails.
-	for _, want := range []string{"copilot_bin=", "exit 127", "$remote_shell"} {
+	for _, want := range []string{"copilot_bin=", "command -v copilot", "exit 127"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("resolver command missing %q:\n%s", want, cmd)
 		}

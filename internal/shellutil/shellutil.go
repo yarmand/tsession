@@ -23,6 +23,18 @@ func Join(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
+// InteractiveLoginCommand returns a POSIX-shell fragment that runs command
+// after initializing the remote user's configured shell as an interactive
+// login shell. The command itself runs under /bin/sh with the initialized
+// environment, so callers can use portable shell syntax regardless of whether
+// the user's shell is zsh, bash, fish, or csh.
+func InteractiveLoginCommand(command string) string {
+	inner := "exec /bin/sh -c " + Quote(command)
+	return `remote_shell=${SHELL:-/bin/sh}; ` +
+		`case "${remote_shell##*/}" in csh|tcsh) shell_flags=-ic ;; *) shell_flags=-lic ;; esac; ` +
+		`exec "$remote_shell" "$shell_flags" ` + Quote(inner)
+}
+
 // CopilotResolverCommand returns a shell fragment that resolves the absolute
 // path to the `copilot` binary using the remote's own interactive login
 // shell, so PATH customizations in .bashrc/.zshrc are respected the same way
@@ -31,10 +43,7 @@ func Join(args []string) string {
 // stderr and exits 127. Callers append their own command referencing
 // "$copilot_bin".
 func CopilotResolverCommand() string {
-	probe := "exec /bin/sh -c " + Quote("command -v copilot")
-	return `remote_shell=${SHELL:-/bin/sh}; ` +
-		`case "${remote_shell##*/}" in csh|tcsh) shell_flags=-ic ;; *) shell_flags=-lic ;; esac; ` +
-		`copilot_bin=$("$remote_shell" "$shell_flags" ` + Quote(probe) + ` 2>/dev/null | tail -n 1); ` +
+	return `copilot_bin=$(command -v copilot 2>/dev/null | tail -n 1); ` +
 		`case "$copilot_bin" in /*) ;; *) echo 'copilot resolver did not return an absolute path' >&2; exit 127 ;; esac; ` +
 		`if [ ! -x "$copilot_bin" ]; then echo 'copilot not found in remote interactive shell PATH' >&2; exit 127; fi; `
 }

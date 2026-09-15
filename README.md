@@ -227,9 +227,11 @@ remotes:
 
 ### How it works
 
-`tsession` first resolves `tsession` from the remote host's login-shell `PATH`.
-When found, it uses that binary directly without installation, presence, or
-version checks. If no PATH binary exists, it installs a matching release under
+Remote commands initialize the user's configured shell as an interactive login
+shell, matching a normal SSH terminal and loading PATH additions such as
+Homebrew. `tsession` then resolves `tsession` from that PATH. When found, it
+uses that binary directly without installation, presence, or version checks.
+If no PATH binary exists, it installs a matching release under
 `~/.tsession/remote-bin/<version>/tsession`.
 
 Remote gathering starts `tsession watch --daemon` if no watcher is
@@ -288,7 +290,13 @@ are skipped with a warning without blocking the local cache update.
 `tsession serve` starts a loopback-only web server with a two-panel UI: the
 session list on the left (mirroring `browse --watch --active --short`) and an
 xterm.js terminal on the right. Clicking a row attaches the terminal to that
-session's PTY.
+session's PTY. Local/remote labels are shown directly in each row, with a
+different color assigned to each configured remote.
+
+Press `Alt+H` or use the top-left button to collapse or restore the session
+list. When collapsed, `Alt+/` opens the list as an overlay without resizing the
+terminal; selecting a session closes the overlay automatically. Drag the
+list's right edge to resize it; the chosen width is remembered locally.
 
 ```bash
 tsession serve            # http://127.0.0.1:4270

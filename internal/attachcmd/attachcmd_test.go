@@ -147,8 +147,8 @@ func TestBuild_RemoteSSH_WithTarget(t *testing.T) {
 	// ssh joins its trailing args with spaces to form the remote command
 	// line — see Build's comment on the ssh/codespace case.
 	last := args[len(args)-1]
-	if !strings.HasPrefix(last, "bash -lc ") {
-		t.Fatalf("expected last ssh arg to start with 'bash -lc ', got %q", last)
+	if !strings.HasPrefix(last, "sh -c ") || !strings.Contains(last, `shell_flags=-lic`) {
+		t.Fatalf("expected ssh command to initialize the interactive login shell, got %q", last)
 	}
 	web := WebSessionName("myhost", "rsess1")
 	if !strings.Contains(last, "tmux new-session -d -s") || !strings.Contains(last, web) {
@@ -193,7 +193,7 @@ func TestBuild_RemoteSSH_NoTarget_ResolvesCopilotBinary(t *testing.T) {
 	}
 	last := args[len(args)-1]
 	for _, want := range []string{
-		"remote_shell=", // resolver logic present
+		"remote_shell=", // interactive login shell initialization
 		`TSESSION_COPILOT_BIN="$copilot_bin"`,
 		`exec "$copilot_bin" --resume=`,
 	} {
@@ -238,8 +238,8 @@ func TestBuild_RemoteCodespace(t *testing.T) {
 		t.Errorf("expected codespace name in args: %v", args)
 	}
 	last := args[len(args)-1]
-	if !strings.HasPrefix(last, "bash -lc ") {
-		t.Fatalf("expected codespace command to embed script as one bash -lc arg, got %q", last)
+	if !strings.HasPrefix(last, "sh -c ") || !strings.Contains(last, `shell_flags=-lic`) {
+		t.Fatalf("expected codespace command to initialize the interactive login shell, got %q", last)
 	}
 }
 
@@ -253,18 +253,18 @@ func TestBuild_RemoteDevcontainer_SeparateExecArgs(t *testing.T) {
 	if bin != "docker" {
 		t.Fatalf("expected docker, got %q", bin)
 	}
-	// Unlike ssh/codespace, devcontainer passes bash/-lc/script as three
+	// Unlike ssh/codespace, devcontainer passes sh/-c/script as three
 	// separate argv entries — docker execs directly without an intermediate
 	// shell rejoining them, so no extra quoting layer is needed or correct.
 	if len(args) < 3 {
 		t.Fatalf("expected at least 3 trailing args, got %v", args)
 	}
-	if args[len(args)-3] != "bash" || args[len(args)-2] != "-lc" {
-		t.Fatalf("expected trailing [...,bash,-lc,script], got %v", args[len(args)-3:])
+	if args[len(args)-3] != "sh" || args[len(args)-2] != "-c" {
+		t.Fatalf("expected trailing [...,sh,-c,script], got %v", args[len(args)-3:])
 	}
 	script := args[len(args)-1]
-	if !strings.Contains(script, "tmux new-session") {
-		t.Errorf("expected raw script as final arg, got %q", script)
+	if !strings.Contains(script, "tmux new-session") || !strings.Contains(script, `shell_flags=-lic`) {
+		t.Errorf("expected interactive-shell-wrapped script as final arg, got %q", script)
 	}
 }
 

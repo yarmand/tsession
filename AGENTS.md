@@ -145,10 +145,12 @@ resumes it; if it exists at a different path, `new` uses a unique suffixed name.
 | `--target <value>` | (browse, resume) Switch a different tmux client. Pass a `/dev/...` path directly, or any other value (e.g. `pick`) to choose interactively via fzf at startup. |
 | `--notify` | (list, browse, watch) Fire a macOS desktop notification when a session enters `done` (sound "Tink") or `question` (sound "Funk"). Off by default. Needs a long-running observer: `watch --daemon --notify` or `browse --watch --notify`. No-op on non-macOS. |
 
-Remote gathering prefers the remote login shell's PATH-resolved `tsession`
-without performing installation or version checks. If absent, it installs a
-matching release. It then ensures `tsession watch --daemon` is running and
-consumes `tsession list --active --local-only --json`, preserving the same tmux
+Remote discovery and attachment initialize the configured remote shell as an
+interactive login shell, so user PATH setup such as Homebrew is available.
+Gathering prefers the resulting PATH-resolved `tsession` without installation
+or version checks. If absent, it installs a matching release. It then ensures
+`tsession watch --daemon` is running and consumes
+`tsession list --active --local-only --json`, preserving the same tmux
 session/pane match shown by an interactive remote list.
 
 ## Session Names
@@ -178,6 +180,12 @@ tmux-in-tmux nesting when resuming remote sessions. Full design:
 | `internal/webterm` | Generic PTY registry keyed by `(origin, sessionID)`. Owns the `creack/pty` file, child process, a 256KB output ring buffer (replayed on reconnect), and fan-out to subscribed WebSocket clients. Knows nothing about tmux or SSH. |
 | `internal/attachcmd` | The only place that knows how to build the command `webterm` runs: grouped-tmux-attach scripts, remote-transport wrapping (via `config.Remote.ResumeCommand()`), and `BuildKill` for teardown (`tmux kill-session`). |
 | `internal/webui/static` | `go:embed`ed frontend: `index.html`, `app.js`, `app.css`, plus vendored `xterm.js`/`xterm.css`/the fit addon under `vendor/` (MIT-licensed, no Node build step, no CDN dependency at runtime). |
+
+The web/GUI session list uses per-remote label colors. `Alt+H` (or the
+top-left button) toggles the persistent sidebar. If collapsed, `Alt+/` opens it
+as an overlay over the terminal; selecting a session closes the overlay without
+resizing the terminal pane. The sidebar's right-edge pointer handle updates a
+bounded CSS width and persists it in browser local storage.
 
 **Attach model:** local sessions attach through a **grouped tmux session**
 (`tmux new-session -t <original>`, name `tsession-web-<sha256(origin+id)[:12]>`)

@@ -4,6 +4,7 @@
   "use strict";
 
   const REFRESH_INTERVAL_MS = 5000;
+  const SIDEBAR_WIDTH_KEY = "tsession-sidebar-width";
 
   const state = {
     sessions: [],
@@ -14,8 +15,15 @@
     renameTarget: null, // { kind: "session"|"repo", id, currentName }
     focusTarget: "list", // "list" | "terminal" — see the Focus management section below
     listIndex: 0, // keyboard-navigation cursor row in state.sessions
+    sidebarCollapsed: false,
+    sidebarOverlay: false,
+    sidebarResizing: false,
   };
 
+  const appEl = document.getElementById("app");
+  const sessionsEl = document.getElementById("sessions");
+  const sessionsToggle = document.getElementById("sessions-toggle");
+  const sessionsResize = document.getElementById("sessions-resize");
   const listEl = document.getElementById("session-list");
   const infoEl = document.getElementById("session-info");
   const terminalEl = document.getElementById("terminal");
@@ -54,6 +62,18 @@
     return source === "pi" ? "\u03C0" : "\u00A9"; // π / ©
   }
 
+  function remoteColors() {
+    const origins = [...new Set(
+      state.sessions.filter((s) => s.origin).map((s) => s.origin)
+    )].sort();
+    const colors = new Map();
+    origins.forEach((origin, index) => {
+      const hue = Math.round((index * 137.508 + 24) % 360);
+      colors.set(origin, `hsl(${hue} 78% 68%)`);
+    });
+    return colors;
+  }
+
   function formatAge(iso) {
     if (!iso) return "";
     const then = new Date(iso).getTime();
@@ -71,6 +91,7 @@
 
   function renderSessions() {
     listEl.innerHTML = "";
+    const colors = remoteColors();
     state.sessions.forEach((s, i) => {
       const key = sessionKey(s);
       const li = document.createElement("li");
@@ -91,6 +112,16 @@
       const src = document.createElement("span");
       src.textContent = sourceGlyph(s.source);
       line1.appendChild(src);
+
+      const location = document.createElement("span");
+      const remote = Boolean(s.origin);
+      location.className = "location " + (remote ? "remote" : "local");
+      location.textContent = remote ? (s.remoteHost || s.origin) : "local";
+      if (remote) location.style.color = colors.get(s.origin);
+      location.title = remote
+        ? "Remote session: " + (s.remoteHost || s.origin)
+        : "Local session";
+      line1.appendChild(location);
 
       const repo = document.createElement("span");
       repo.className = "repo";
@@ -314,6 +345,10 @@
   }
 
   function selectSession(s) {
+    if (state.sidebarCollapsed) {
+      state.sidebarOverlay = false;
+      updateSidebarState();
+    }
     state.selectedSession = s;
     state.selectedKey = sessionKey(s);
     const idx = state.sessions.findIndex((x) => sessionKey(x) === state.selectedKey);
@@ -367,8 +402,9 @@
     state.socket.send(msg);
   }
 
-  // --- Focus management: Cmd+/ (or Ctrl+/) toggles keyboard focus between
-  // the session list and the terminal. While the terminal has focus, all
+  // --- Focus management: Alt+/ toggles keyboard focus between the session
+  // list and the terminal. Match the physical Slash key because macOS Option
+  // may compose event.key into a different character. While the terminal has focus, all
   // keystrokes go to the PTY; while the list has focus, arrow keys move a
   // highlight and Enter attaches. Browser-overridable shortcuts (Cmd+F,
   // Cmd+S, etc.) are suppressed while the terminal is focused so they reach
@@ -376,18 +412,65 @@
   // the browser/OS itself and cannot be intercepted from JavaScript.
 
   function focusTerminal() {
-    if (!state.term || !state.selectedSession) return;
     state.focusTarget = "terminal";
-    state.term.focus();
+    state.sidebarOverlay = false;
+    if (state.term && state.selectedSession) state.term.focus();
+    updateSidebarState();
     updateFocusIndicator();
   }
 
   function focusList() {
     state.focusTarget = "list";
+    if (state.sidebarCollapsed) state.sidebarOverlay = true;
     if (state.term) state.term.blur();
     if (state.listIndex == null) state.listIndex = 0;
+    updateSidebarState();
     updateFocusIndicator();
     renderSessions();
+  }
+
+  function updateSidebarState() {
+    appEl.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+    appEl.classList.toggle(
+      "sidebar-overlay",
+      state.sidebarCollapsed && state.sidebarOverlay
+    );
+    const action = state.sidebarCollapsed ? "Show" : "Hide";
+    sessionsToggle.setAttribute("aria-label", action + " session list");
+    sessionsToggle.title = action + " session list (Alt+H)";
+  }
+
+  function toggleSidebar() {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    state.sidebarOverlay = false;
+    if (state.sidebarCollapsed && state.selectedSession) {
+      focusTerminal();
+      return;
+    }
+    if (!state.sidebarCollapsed) focusList();
+    updateSidebarState();
+  }
+
+  function setSidebarWidth(px, persist = true) {
+    const maxWidth = Math.max(180, window.innerWidth * 0.6);
+    const width = Math.round(Math.max(180, Math.min(px, maxWidth)));
+    appEl.style.setProperty("--sidebar-width", width + "px");
+    if (persist) {
+      try {
+        localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+      } catch (e) {
+        // Storage can be unavailable in restricted browser contexts.
+      }
+    }
+  }
+
+  function restoreSidebarWidth() {
+    try {
+      const width = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+      if (Number.isFinite(width) && width > 0) setSidebarWidth(width, false);
+    } catch (e) {
+      // Keep the CSS default when storage is unavailable.
+    }
   }
 
   function updateFocusIndicator() {
@@ -420,9 +503,15 @@
       const key = ev.key.toLowerCase();
       const mod = ev.metaKey || ev.ctrlKey;
 
-      // Cmd+/ (or Ctrl+/) toggles focus regardless of which panel is
-      // currently focused.
-      if (mod && key === "/") {
+      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "KeyH") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        toggleSidebar();
+        return;
+      }
+
+      // Alt+/ toggles focus regardless of which panel is currently focused.
+      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "Slash") {
         ev.preventDefault();
         ev.stopPropagation();
         if (state.focusTarget === "terminal") focusList();
@@ -463,9 +552,35 @@
   );
 
   terminalEl.addEventListener("click", focusTerminal);
-  document.getElementById("sessions").addEventListener("click", () => {
+  sessionsEl.addEventListener("click", (ev) => {
+    if (ev.target.closest(".session-row")) return;
     if (state.focusTarget !== "list") focusList();
   });
+  sessionsToggle.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    toggleSidebar();
+  });
+  sessionsResize.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    state.sidebarResizing = true;
+    sessionsResize.setPointerCapture(ev.pointerId);
+    document.body.classList.add("resizing-sidebar");
+  });
+  sessionsResize.addEventListener("pointermove", (ev) => {
+    if (!state.sidebarResizing) return;
+    setSidebarWidth(ev.clientX);
+  });
+  function stopSidebarResize(ev) {
+    if (!state.sidebarResizing) return;
+    state.sidebarResizing = false;
+    document.body.classList.remove("resizing-sidebar");
+    if (sessionsResize.hasPointerCapture(ev.pointerId)) {
+      sessionsResize.releasePointerCapture(ev.pointerId);
+    }
+  }
+  sessionsResize.addEventListener("pointerup", stopSidebarResize);
+  sessionsResize.addEventListener("pointercancel", stopSidebarResize);
 
   // --- Rename modal (sessions and repository aliases) ---
 
@@ -578,8 +693,10 @@
 
   requestNotificationPermission();
   registerServiceWorker();
+  restoreSidebarWidth();
   refreshSessions();
   setInterval(refreshSessions, REFRESH_INTERVAL_MS);
   connectEvents();
+  updateSidebarState();
   updateFocusIndicator();
 })();

@@ -11,9 +11,11 @@ import (
 
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/sessions"
+	"github.com/yarma/tsession/internal/shellutil"
 )
 
 const defaultRemoteCheckInterval = 24 * time.Hour
+const remoteOutputMarker = "__TSESSION_REMOTE_COMMAND_OUTPUT__"
 
 // FetchOptions carries per-fetch remote binary update policy.
 type FetchOptions struct {
@@ -44,13 +46,18 @@ var runRemoteCmd = func(ctx context.Context, r config.Remote, cmd string) ([]byt
 		}
 		return stdout.Bytes(), fmt.Errorf("%s %s: %w", bin, label, err)
 	}
-	return stdout.Bytes(), nil
+	out := stdout.Bytes()
+	if marker := bytes.LastIndex(out, []byte(remoteOutputMarker+"\n")); marker >= 0 {
+		out = out[marker+len(remoteOutputMarker)+1:]
+	}
+	return out, nil
 }
 
 func remoteShellInvocation(r config.Remote, cmd string) (string, []string, string) {
 	bin, args := r.GatherCommand()
-	args = append(args, "bash", "-l", "-s")
-	return bin, args, "set -e\n" + cmd + "\n"
+	args = append(args, "sh", "-s")
+	command := "printf '%s\\n' " + shellQuote(remoteOutputMarker) + "\nset -e\n" + cmd
+	return bin, args, shellutil.InteractiveLoginCommand(command) + "\n"
 }
 
 var ensureRemoteBinaryFn = EnsureRemoteBinary

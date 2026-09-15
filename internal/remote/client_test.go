@@ -18,12 +18,20 @@ func TestRemoteShellInvocation_SendsCommandOnStdin(t *testing.T) {
 	if bin != "ssh" {
 		t.Fatalf("binary = %q, want ssh", bin)
 	}
-	wantArgs := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "devbox", "bash", "-l", "-s"}
+	wantArgs := []string{"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "devbox", "sh", "-s"}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %v, want %v", args, wantArgs)
 	}
-	if stdin != "set -e\ntmux has-session -t tsessiond\n" {
-		t.Fatalf("stdin = %q", stdin)
+	for _, want := range []string{
+		`remote_shell=${SHELL:-/bin/sh}`,
+		`*) shell_flags=-lic`,
+		`exec "$remote_shell" "$shell_flags"`,
+		remoteOutputMarker,
+		"tmux has-session -t tsessiond",
+	} {
+		if !strings.Contains(stdin, want) {
+			t.Errorf("stdin missing %q:\n%s", want, stdin)
+		}
 	}
 }
 

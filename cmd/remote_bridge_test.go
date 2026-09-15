@@ -24,25 +24,12 @@ func TestRemoteBridgeNameIsStableAndSanitized(t *testing.T) {
 
 func TestRemoteResumeCommandQuotesSessionIDForTmuxShell(t *testing.T) {
 	got := remoteResumeCommand("$(touch /tmp/tsession-injected)")
-	probe := "exec /bin/sh -c " + shellQuote("command -v copilot")
-	resolver := `remote_shell=${SHELL:-/bin/sh}; ` +
-		`case "${remote_shell##*/}" in csh|tcsh) shell_flags=-ic ;; *) shell_flags=-lic ;; esac; ` +
-		`copilot_bin=$("$remote_shell" "$shell_flags" ` + shellQuote(probe) + ` 2>/dev/null | tail -n 1); ` +
+	resolver := `copilot_bin=$(command -v copilot 2>/dev/null | tail -n 1); ` +
 		`case "$copilot_bin" in /*) ;; *) echo 'copilot resolver did not return an absolute path' >&2; exit 127 ;; esac; ` +
 		`if [ ! -x "$copilot_bin" ]; then echo 'copilot not found in remote interactive shell PATH' >&2; exit 127; fi; `
 	want := resolver + `exec "$copilot_bin" --resume='$(touch /tmp/tsession-injected)'`
 	if got != want {
 		t.Fatalf("resume command = %q, want %q", got, want)
-	}
-}
-
-func TestRemoteCopilotResolverSupportsCshInteractiveFlags(t *testing.T) {
-	got := remoteCopilotResolverCommand()
-	if !strings.Contains(got, `case "${remote_shell##*/}" in csh|tcsh) shell_flags=-ic`) {
-		t.Fatalf("resolver does not select csh-compatible interactive flags: %q", got)
-	}
-	if !strings.Contains(got, `*) shell_flags=-lic`) {
-		t.Fatalf("resolver does not preserve login interactive flags for Bourne shells: %q", got)
 	}
 }
 
@@ -164,11 +151,13 @@ func TestRemoteBridgeCommandDevcontainerWithoutTmuxResumesDirectly(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPrefix := []string{"exec", "-it", "-u", "vscode", "app", "bash", "-lc"}
+	wantPrefix := []string{"exec", "-it", "-u", "vscode", "app", "sh", "-c"}
 	if bin != "docker" || !reflect.DeepEqual(args[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("command = %s %v", bin, args)
 	}
-	if args[len(args)-1] != remoteResumeCommand("abcdefgh-1234") {
+	if !strings.Contains(args[len(args)-1], "command -v copilot") ||
+		!strings.Contains(args[len(args)-1], "abcdefgh-1234") ||
+		!strings.Contains(args[len(args)-1], `shell_flags=-lic`) {
 		t.Fatalf("remote command = %q", args[len(args)-1])
 	}
 }

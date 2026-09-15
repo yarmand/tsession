@@ -15,13 +15,15 @@
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<button id="sessions-toggle" type="button" aria-label="Hide session list" title="Hide session list (Alt+H)">&#9776;</button>
 <div id="app">
   <aside id="sessions">
-    <div id="sessions-hint">&#8984;/ toggles focus &middot; &uarr;&darr; move &middot; &crarr; attach</div>
+    <div id="sessions-hint">Alt+/ focus &middot; Alt+H hide &middot; &uarr;&darr; move &middot; &crarr; attach</div>
     <ul id="session-list"></ul>
     <section id="session-info" aria-label="Selected session information">
       <div class="info-empty">Select a session to inspect.</div>
     </section>
+    <div id="sessions-resize" role="separator" aria-orientation="vertical" aria-label="Resize session list"></div>
   </aside>
   <main id="terminal-pane">
     <div id="terminal-banner" class="hidden"></div>

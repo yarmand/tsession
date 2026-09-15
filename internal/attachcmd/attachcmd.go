@@ -94,6 +94,9 @@ func buildScript(s sessions.Session) (string, error) {
 		if s.TmuxTarget != "" {
 			return groupedAttachScript(web, s.TmuxTarget)
 		}
+		if s.TmuxName != "" {
+			return groupedAttachScript(web, s.TmuxName)
+		}
 		return newSessionAndAttachScript(web, localResumeCommand(s)), nil
 	}
 
@@ -111,14 +114,27 @@ func buildScript(s sessions.Session) (string, error) {
 
 // groupedAttachScript builds the script that ensures a grouped tmux session
 // named web exists (sharing target's windows/panes) and switches it to the
-// specific window and pane identified by target (in "session:window.pane"
-// form, as produced by tmux.Pane.Target()), then attaches to it.
+// specific window and pane identified by target when it is in
+// "session:window.pane" form (as produced by tmux.Pane.Target()). A
+// session-only target is also accepted when discovery found the tmux session
+// by working directory but could not resolve the owning process to a pane.
 //
 // tmux new-session -A is deliberately not used here: it *attaches* when the
 // session already exists (ignoring -d), so it cannot serve as an "ensure a
 // detached session exists" primitive. has-session/new-session is the
 // deterministic form.
 func groupedAttachScript(web, target string) (string, error) {
+	if target == "" {
+		return "", fmt.Errorf("attachcmd: empty tmux target")
+	}
+
+	webQ := shellutil.Quote(web)
+	if !strings.Contains(target, ":") {
+		origQ := shellutil.Quote(target)
+		return "tmux has-session -t " + webQ + " 2>/dev/null || tmux new-session -d -s " + webQ + " -t " + origQ + "; " +
+			"exec tmux attach-session -t " + webQ, nil
+	}
+
 	origSession, windowPane, ok := splitTarget(target)
 	if !ok {
 		return "", fmt.Errorf("attachcmd: malformed tmux target %q", target)
@@ -128,7 +144,6 @@ func groupedAttachScript(web, target string) (string, error) {
 		return "", fmt.Errorf("attachcmd: malformed tmux target %q", target)
 	}
 
-	webQ := shellutil.Quote(web)
 	origQ := shellutil.Quote(origSession)
 	winTargetQ := shellutil.Quote(web + ":" + window)
 	paneTargetQ := shellutil.Quote(web + ":" + window + "." + pane)

@@ -129,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 type SessionView struct {
 	ID           string    `json:"id"`
 	Origin       string    `json:"origin"`
+	RemoteHost   string    `json:"remoteHost"`
 	Source       string    `json:"source"`
 	State        string    `json:"state"`
 	Name         string    `json:"name"`
@@ -139,6 +140,8 @@ type SessionView struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 	LastEventAt  time.Time `json:"lastEventAt"`
 	HasTmux      bool      `json:"hasTmux"`
+	TmuxSession  string    `json:"tmuxSession"`
+	TmuxTarget   string    `json:"tmuxTarget"`
 }
 
 // SessionsResponse is the top-level JSON payload of GET /api/sessions.
@@ -163,6 +166,20 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := render.BuildShortContextWithAliases(all, aliases)
 
 	resp := SessionsResponse{Sessions: BuildSessionViews(active, ctx)}
+	for i := range resp.Sessions {
+		if resp.Sessions[i].Origin == "" {
+			continue
+		}
+		if resp.Sessions[i].RemoteHost == "" {
+			resp.Sessions[i].RemoteHost = resp.Sessions[i].Origin
+		}
+		if s.remoteFn == nil {
+			continue
+		}
+		if remote, ok, resolveErr := s.remoteFn(resp.Sessions[i].Origin); resolveErr == nil && ok {
+			resp.Sessions[i].RemoteHost = remote.Endpoint()
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -189,11 +206,16 @@ func sessionView(s sessions.Session, ctx render.ShortContext) SessionView {
 		repo = render.WorktreeName(s)
 	}
 
-	hasTmux := s.Origin == "" && s.TmuxTarget != "" || s.Origin != "" && s.RemoteTmuxAvailable
+	hasTmux := s.Origin == "" && (s.TmuxTarget != "" || s.TmuxName != "") || s.Origin != "" && s.RemoteTmuxAvailable
+	tmuxTarget := s.TmuxTarget
+	if s.Origin != "" {
+		tmuxTarget = s.RemoteTmuxTarget
+	}
 
 	return SessionView{
 		ID:           s.ID,
 		Origin:       s.Origin,
+		RemoteHost:   s.RemoteHost,
 		Source:       s.Source,
 		State:        s.State.String(),
 		Name:         s.Name,
@@ -204,5 +226,7 @@ func sessionView(s sessions.Session, ctx render.ShortContext) SessionView {
 		UpdatedAt:    s.UpdatedAt,
 		LastEventAt:  s.LastEventAt,
 		HasTmux:      hasTmux,
+		TmuxSession:  s.TmuxSessionName(),
+		TmuxTarget:   tmuxTarget,
 	}
 }

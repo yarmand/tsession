@@ -104,7 +104,10 @@ func sessionToPayload(s sessions.Session) SessionPayload {
 		Summary:    s.Summary,
 		State:      s.State.String(),
 		Source:     s.Source,
-		TmuxTarget: s.TmuxTarget,
+		TmuxTarget: s.TmuxSessionName(),
+	}
+	if s.TmuxTarget != "" {
+		sp.TmuxTarget = s.TmuxTarget
 	}
 	if !s.UpdatedAt.IsZero() {
 		sp.UpdatedAt = s.UpdatedAt.UTC().Format(time.RFC3339Nano)

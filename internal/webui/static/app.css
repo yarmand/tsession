@@ -33,7 +33,7 @@ html, body {
 #sessions {
   background: var(--panel-bg);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
@@ -54,9 +54,49 @@ html, body {
 }
 
 #session-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+#session-info {
+  flex: none;
+  max-height: 42%;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: #141414;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+}
+
+.info-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 6px;
+  margin: 2px 0;
+}
+
+.info-label {
+  color: var(--dim);
+}
+
+.info-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.info-summary .info-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.info-empty {
+  color: var(--dim);
 }
 
 .session-row {

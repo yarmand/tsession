@@ -139,10 +139,17 @@ resumes it; if it exists at a different path, `new` uses a unique suffixed name.
 | `--lshort <n>` | Implies `--short`; truncate each display line to `n` characters (preserves age suffix). Disables color. |
 | `--no-color` | (list only) Disable ANSI colors |
 | `--fzf` | (list only) Tab-delimited output for fzf consumption (display + selection ID) |
+| `--json` | (list only) Emit sessions as machine-readable JSON |
 | `--no-cache` | (list only) Skip the watcher cache and load live |
 | `--watch` | (browse only) Auto-refresh every 5s and re-open picker after each selection. `ESC` exits. |
 | `--target <value>` | (browse, resume) Switch a different tmux client. Pass a `/dev/...` path directly, or any other value (e.g. `pick`) to choose interactively via fzf at startup. |
 | `--notify` | (list, browse, watch) Fire a macOS desktop notification when a session enters `done` (sound "Tink") or `question` (sound "Funk"). Off by default. Needs a long-running observer: `watch --daemon --notify` or `browse --watch --notify`. No-op on non-macOS. |
+
+Remote gathering prefers the remote login shell's PATH-resolved `tsession`
+without performing installation or version checks. If absent, it installs a
+matching release. It then ensures `tsession watch --daemon` is running and
+consumes `tsession list --active --local-only --json`, preserving the same tmux
+session/pane match shown by an interactive remote list.
 
 ## Session Names
 
@@ -200,4 +207,3 @@ call.
 `::1`, or literal `localhost`); anything else is rejected before the listener
 binds. There is no auth, TLS, or non-loopback access in v1 — PTYs must never
 be reachable off-host.
-

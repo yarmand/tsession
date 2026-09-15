@@ -227,11 +227,16 @@ remotes:
 
 ### How it works
 
-`tsession` installs the matching release binary under
-`~/.tsession/remote-bin/<version>/tsession` and requests a one-shot JSON
-snapshot through the configured transport. Remote tmux is optional; when
-available, the snapshot includes exact pane targets. Each remote appears as its
-own section:
+`tsession` first resolves `tsession` from the remote host's login-shell `PATH`.
+When found, it uses that binary directly without installation, presence, or
+version checks. If no PATH binary exists, it installs a matching release under
+`~/.tsession/remote-bin/<version>/tsession`.
+
+Remote gathering starts `tsession watch --daemon` if no watcher is
+already running, then reads `tsession list --active --local-only --json`. This
+uses the same session/tmux matching path as an interactive remote
+`tsession list --active`, including exact pane targets when available. Each
+remote appears as its own section:
 
 ```
 ── Local ──────────────────────────────────────────────────────────
@@ -262,6 +267,7 @@ bridge.
 | Flag           | Description                                        |
 |----------------|----------------------------------------------------|
 | `--local-only` | Skip remote gathering (useful offline or for speed) |
+| `--json`       | Emit the session list as machine-readable JSON      |
 
 ### Caching
 
@@ -273,7 +279,7 @@ are skipped with a warning without blocking the local cache update.
 
 - **Remote unreachable:** The section shows as
   `── devbox (unreachable) ──` and local sessions work normally.
-- **sqlite3 not found:** The remote is skipped. Install `sqlite3` on the remote.
+- **tsession not in PATH:** A matching release is installed automatically.
 - **Slow SSH:** Ensure `ControlMaster` is configured in `~/.ssh/config` for
   persistent connections. The gather script completes in <1s on most hosts.
 

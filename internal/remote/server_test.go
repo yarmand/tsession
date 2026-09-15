@@ -52,6 +52,26 @@ func TestBuildActiveSnapshotReportsTmuxCapabilityAndTarget(t *testing.T) {
 	}
 }
 
+func TestBuildActiveSnapshotUsesTmuxNameWhenExactPaneIsUnknown(t *testing.T) {
+	oldLoad := loadLocalSessionsFn
+	t.Cleanup(func() { loadLocalSessionsFn = oldLoad })
+	loadLocalSessionsFn = func(time.Duration) ([]sessions.Session, bool, error) {
+		return []sessions.Session{{
+			ID:       "remote-id",
+			State:    sessions.StateActiveIdle,
+			TmuxName: "famstack",
+		}}, true, nil
+	}
+
+	payload, err := BuildActiveSnapshot(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Sessions) != 1 || payload.Sessions[0].TmuxTarget != "famstack" {
+		t.Fatalf("payload sessions = %+v", payload.Sessions)
+	}
+}
+
 func TestServe_HealthRequest(t *testing.T) {
 	in := strings.NewReader(`{"id":"1","method":"health"}` + "\n")
 	var out strings.Builder

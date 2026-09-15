@@ -17,6 +17,7 @@
   };
 
   const listEl = document.getElementById("session-list");
+  const infoEl = document.getElementById("session-info");
   const terminalEl = document.getElementById("terminal");
   const emptyStateEl = document.getElementById("empty-state");
   const bannerEl = document.getElementById("terminal-banner");
@@ -121,6 +122,50 @@
       });
       listEl.appendChild(li);
     });
+    renderSessionInfo();
+  }
+
+  function infoValue(value, fallback = "\u2014") {
+    return value || fallback;
+  }
+
+  function addInfoRow(label, value, className = "") {
+    const row = document.createElement("div");
+    row.className = "info-row" + (className ? " " + className : "");
+    const labelEl = document.createElement("span");
+    labelEl.className = "info-label";
+    labelEl.textContent = label;
+    const valueEl = document.createElement("span");
+    valueEl.className = "info-value";
+    valueEl.textContent = value;
+    valueEl.title = value;
+    row.append(labelEl, valueEl);
+    infoEl.appendChild(row);
+  }
+
+  function renderSessionInfo() {
+    infoEl.innerHTML = "";
+    const s = state.sessions[state.listIndex];
+    if (!s) {
+      const empty = document.createElement("div");
+      empty.className = "info-empty";
+      empty.textContent = "Select a session to inspect.";
+      infoEl.appendChild(empty);
+      return;
+    }
+
+    addInfoRow("ID", infoValue(s.id));
+    addInfoRow("State", infoValue(s.state));
+    addInfoRow("Age", infoValue(formatAge(s.lastEventAt || s.updatedAt)));
+    addInfoRow("CWD", infoValue(s.cwd));
+    addInfoRow("Repo", infoValue(s.repository));
+    addInfoRow("Source", infoValue(s.source));
+    addInfoRow("Remote", s.origin ? infoValue(s.remoteHost || s.origin) : "local");
+    addInfoRow("Tmux", infoValue(s.tmuxSession, "(none)"));
+    if (s.tmuxTarget && s.tmuxTarget !== s.tmuxSession) {
+      addInfoRow("Target", s.tmuxTarget);
+    }
+    addInfoRow("Summary", infoValue(s.summary, "(no summary)"), "info-summary");
   }
 
   async function refreshSessions() {

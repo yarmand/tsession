@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ func List(args []string) error {
 	maxAge := fs.Duration("max-age", 14*24*time.Hour, "ignore sessions older than this")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	fzfMode := fs.Bool("fzf", false, "emit tab-delimited lines for fzf consumption")
+	jsonMode := fs.Bool("json", false, "emit sessions as JSON")
 	noCache := fs.Bool("no-cache", false, "ignore the watch cache and load live")
 	localOnly := fs.Bool("local-only", false, "only show local sessions")
 	active := fs.Bool("active", false, "only show sessions attached to tmux with a known, non-exited state")
@@ -67,6 +69,9 @@ func List(args []string) error {
 	all := append([]sessions.Session(nil), local...)
 	for _, name := range remoteNames {
 		all = append(all, remoteMap[name]...)
+	}
+	if *jsonMode {
+		return json.NewEncoder(os.Stdout).Encode(all)
 	}
 
 	useShort := *short || *lshort > 0
@@ -161,9 +166,12 @@ func writeFzfSession(w io.Writer, s sessions.Session, display string, now time.T
 	if summary == "" {
 		summary = "(no summary)"
 	}
+	remoteHost := firstNonEmpty(s.RemoteHost, s.Origin, "local")
+	tmuxSession := firstNonEmpty(s.TmuxSessionName(), "(none)")
 	// Keep field positions stable for browse bindings and preview:
-	// 2=id, 3=repository, 8=summary, 9=legacy legend placeholder, 10=origin.
-	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+	// 2=id, 3=repository, 8=summary, 9=legacy legend placeholder, 10=origin,
+	// 11=remote host label, 12=tmux session.
+	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 		display,
 		s.ID,
 		s.Repository,
@@ -174,7 +182,18 @@ func writeFzfSession(w io.Writer, s sessions.Session, display string, now time.T
 		summary,
 		legend,
 		s.Origin,
+		remoteHost,
+		tmuxSession,
 	)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func printSectionDivider(w io.Writer, name string, color, fzfMode bool, lshort int) {

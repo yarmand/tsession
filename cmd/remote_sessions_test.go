@@ -162,15 +162,16 @@ func TestInitialListBytes_IncludesSectionDividers(t *testing.T) {
 	rows := make(map[string][]string)
 	for _, line := range strings.Split(got, "\n") {
 		fields := strings.Split(line, "\t")
-		if len(fields) == 10 {
+		if len(fields) == 12 {
 			rows[fields[1]] = fields
 		}
 	}
-	if len(rows["local"]) != 10 {
-		t.Fatalf("missing ten-field local session row in output:\n%s", got)
+	if len(rows["local"]) != 12 {
+		t.Fatalf("missing twelve-field local session row in output:\n%s", got)
 	}
 	remoteFields := rows["remote"]
-	if len(remoteFields) != 10 || remoteFields[7] != "summary remote" || remoteFields[9] != "devbox" {
+	if len(remoteFields) != 12 || remoteFields[7] != "summary remote" || remoteFields[9] != "devbox" ||
+		remoteFields[10] != "devbox" || remoteFields[11] != "(none)" {
 		t.Fatalf("remote fzf fields = %v, output:\n%s", remoteFields, got)
 	}
 }

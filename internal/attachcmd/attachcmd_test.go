@@ -64,6 +64,27 @@ func TestBuild_LocalWithTarget_UsesGroupedAttach(t *testing.T) {
 	}
 }
 
+func TestBuild_LocalWithTmuxName_UsesGroupedAttach(t *testing.T) {
+	s := sessions.Session{ID: "sess1", TmuxName: "proj"}
+	_, args, err := Build(s, config.Remote{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	script := args[1]
+	web := WebSessionName("", "sess1")
+	for _, want := range []string{
+		"tmux new-session -d -s " + shQ(web) + " -t " + shQ("proj"),
+		"exec tmux attach-session -t " + shQ(web),
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "copilot --resume") {
+		t.Errorf("existing tmux session must not resume copilot:\n%s", script)
+	}
+}
+
 func TestBuild_LocalNoTarget_Copilot(t *testing.T) {
 	s := sessions.Session{ID: "sess2", Source: "copilot"}
 	_, args, err := Build(s, config.Remote{})
@@ -132,6 +153,30 @@ func TestBuild_RemoteSSH_WithTarget(t *testing.T) {
 	web := WebSessionName("myhost", "rsess1")
 	if !strings.Contains(last, "tmux new-session -d -s") || !strings.Contains(last, web) {
 		t.Errorf("expected grouped attach script embedded in ssh command, got %q", last)
+	}
+}
+
+func TestBuild_RemoteSSH_WithSessionOnlyTarget(t *testing.T) {
+	s := sessions.Session{
+		ID:                  "rsess1",
+		Origin:              "myhost",
+		RemoteTmuxAvailable: true,
+		RemoteTmuxTarget:    "work",
+	}
+	r := config.Remote{Name: "myhost", Type: "ssh", Host: "myhost.example.com"}
+	_, args, err := Build(s, r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	last := args[len(args)-1]
+	web := WebSessionName("myhost", "rsess1")
+	if !strings.Contains(last, "tmux new-session -d -s") ||
+		!strings.Contains(last, web) ||
+		!strings.Contains(last, shQ("work")) {
+		t.Errorf("expected grouped session attach, got %q", last)
+	}
+	if strings.Contains(last, "copilot_bin") || strings.Contains(last, "--resume=") {
+		t.Errorf("existing remote tmux session must not resume copilot:\n%s", last)
 	}
 }
 
@@ -232,7 +277,7 @@ func TestBuild_UnsupportedRemoteType(t *testing.T) {
 }
 
 func TestBuild_MalformedTarget(t *testing.T) {
-	cases := []string{"noColonAtAll", "session:", ":0.1", "session:nodothere", "session:.1", "session:0."}
+	cases := []string{"session:", ":0.1", "session:nodothere", "session:.1", "session:0."}
 	for _, target := range cases {
 		t.Run(target, func(t *testing.T) {
 			s := sessions.Session{ID: "sess1", TmuxTarget: target}

@@ -76,23 +76,68 @@ func requestSnapshot(ctx context.Context, r config.Remote, binaryPath string) (*
 	return &resp.Payload, nil
 }
 
-// EnsureDaemonAndSnapshot ensures the remote binary is installed and returns a
-// merged, maxAge-filtered one-shot snapshot of that remote's active sessions.
+// EnsureDaemonAndSnapshot uses a PATH-resolved remote tsession when available,
+// falling back to installing one only when the remote host has no tsession in
+// PATH. It ensures the watcher is running, then obtains active sessions through
+// the same `tsession list --active` path used interactively.
 func EnsureDaemonAndSnapshot(ctx context.Context, r config.Remote, opts FetchOptions, maxAge time.Duration) ([]sessions.Session, error) {
-	checkInterval := opts.CheckInterval
-	if checkInterval <= 0 {
-		checkInterval = defaultRemoteCheckInterval
-	}
-	binaryPath, err := ensureRemoteBinaryFn(ctx, r, opts.ClientTag, UpdateOptions{
-		Force:         opts.ForceUpdate,
-		CheckInterval: checkInterval,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ensure remote binary: %w", err)
-	}
-	payload, err := requestSnapshot(ctx, r, binaryPath)
+	binaryPath, err := remoteBinaryInPath(ctx, r)
 	if err != nil {
 		return nil, err
 	}
-	return payload.ToSessions(r.Name, maxAge), nil
+	if binaryPath == "" {
+		checkInterval := opts.CheckInterval
+		if checkInterval <= 0 {
+			checkInterval = defaultRemoteCheckInterval
+		}
+		binaryPath, err = ensureRemoteBinaryFn(ctx, r, opts.ClientTag, UpdateOptions{
+			Force:         opts.ForceUpdate,
+			CheckInterval: checkInterval,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ensure remote binary: %w", err)
+		}
+	}
+
+	out, err := runRemoteCmd(ctx, r, remoteListCommand(binaryPath, maxAge))
+	if err != nil {
+		return nil, fmt.Errorf("list remote sessions: %w", err)
+	}
+	var listed []sessions.Session
+	if err := json.Unmarshal(bytes.TrimSpace(out), &listed); err != nil {
+		return nil, fmt.Errorf("parse remote session list: %w", err)
+	}
+	return remoteSessions(r, listed), nil
+}
+
+func remoteBinaryInPath(ctx context.Context, r config.Remote) (string, error) {
+	out, err := runRemoteCmd(ctx, r, `if command -v tsession >/dev/null 2>&1; then command -v tsession; fi`)
+	if err != nil {
+		return "", fmt.Errorf("find remote tsession: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func remoteListCommand(binaryPath string, maxAge time.Duration) string {
+	binary := shellQuote(binaryPath)
+	return binary + " watch --daemon >/dev/null && " +
+		binary + " list --active --local-only --json --max-age=" + shellQuote(maxAge.String())
+}
+
+func remoteSessions(r config.Remote, listed []sessions.Session) []sessions.Session {
+	out := make([]sessions.Session, 0, len(listed))
+	for _, s := range listed {
+		target := s.TmuxTarget
+		if target == "" {
+			target = s.TmuxName
+		}
+		s.Origin = r.Name
+		s.RemoteHost = r.Endpoint()
+		s.RemoteTmuxAvailable = target != ""
+		s.RemoteTmuxTarget = target
+		s.TmuxName = ""
+		s.TmuxTarget = ""
+		out = append(out, s)
+	}
+	return out
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/sessions"
 )
 
@@ -16,12 +17,15 @@ func TestHandleSessions_FiltersAndShapesPayload(t *testing.T) {
 	all := []sessions.Session{
 		{ID: "active-local", Repository: "git@github.com:org/repo.git", CWD: "/home/u/repo", TmuxName: "proj", TmuxTarget: "proj:0.0", State: sessions.StateWorking, Source: "copilot", UpdatedAt: now},
 		{ID: "exited-local", Repository: "git@github.com:org/repo.git", TmuxName: "proj2", State: sessions.StateExited, UpdatedAt: now},
-		{ID: "active-remote", Origin: "host1", Repository: "git@github.com:org/repo.git", State: sessions.StateWaiting, RemoteTmuxAvailable: true, Source: "pi", UpdatedAt: now},
+		{ID: "active-remote", Origin: "host1", Repository: "git@github.com:org/repo.git", State: sessions.StateWaiting, RemoteTmuxAvailable: true, RemoteTmuxTarget: "remote-work:2.0", Source: "pi", UpdatedAt: now},
 	}
 
 	srv := NewServer(
 		func() ([]sessions.Session, error) { return all, nil },
 		WithAliases(func() (map[string]string, error) { return map[string]string{"github.com/org/repo": "myalias"}, nil }),
+		WithRemotes(func(origin string) (config.Remote, bool, error) {
+			return config.Remote{Name: origin, Host: "devbox.example.com"}, true, nil
+		}),
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
@@ -75,6 +79,12 @@ func TestHandleSessions_FiltersAndShapesPayload(t *testing.T) {
 	}
 	if !remote.HasTmux {
 		t.Error("active-remote.HasTmux = false, want true (RemoteTmuxAvailable)")
+	}
+	if remote.RemoteHost != "devbox.example.com" {
+		t.Errorf("active-remote.RemoteHost = %q, want devbox.example.com", remote.RemoteHost)
+	}
+	if remote.TmuxSession != "remote-work" || remote.TmuxTarget != "remote-work:2.0" {
+		t.Errorf("active-remote tmux metadata = (%q, %q)", remote.TmuxSession, remote.TmuxTarget)
 	}
 
 	if _, exited := byID["exited-local"]; exited {

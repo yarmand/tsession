@@ -1,6 +1,9 @@
 package sessions
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type State int
 
@@ -48,4 +51,24 @@ type Session struct {
 	Name                string // user-defined display name (from ~/.tsession/names.json)
 	Source              string // "copilot" or "pi"
 	Origin              string // "" = local, otherwise remote name from config
+	RemoteHost          string // configured SSH/codespace/container endpoint
+}
+
+// TmuxSessionName returns the discovered tmux session name, stripping any
+// exact window/pane suffix from the target.
+func (s Session) TmuxSessionName() string {
+	target := s.TmuxTarget
+	if s.Origin != "" {
+		target = s.RemoteTmuxTarget
+	}
+	if target == "" {
+		if s.Origin == "" {
+			return s.TmuxName
+		}
+		return ""
+	}
+	if name, _, ok := strings.Cut(target, ":"); ok {
+		return name
+	}
+	return target
 }

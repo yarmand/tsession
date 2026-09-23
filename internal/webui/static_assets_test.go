@@ -83,10 +83,10 @@ func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /app.js: status = %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "state.term.onResize(() => sendResize())") {
+	if !strings.Contains(rec.Body.String(), "term.onResize(() => {") {
 		t.Fatal("app.js does not forward xterm resize events to the terminal WebSocket")
 	}
-	if !strings.Contains(rec.Body.String(), `JSON.stringify({ type: "resize", cols: state.term.cols, rows: state.term.rows })`) {
+	if !strings.Contains(rec.Body.String(), `JSON.stringify({ type: "resize", cols: pane.term.cols, rows: pane.term.rows })`) {
 		t.Fatal("app.js does not send xterm's current rows and columns in the resize control frame")
 	}
 }

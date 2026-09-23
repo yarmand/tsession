@@ -272,9 +272,38 @@ body.resizing-sidebar {
   flex: 1;
   min-height: 0;
   padding: 4px;
+  position: relative;
 }
 
 #terminal.hidden { display: none; }
+
+.term-pane {
+  position: absolute;
+  inset: 4px;
+}
+
+.term-pane.hidden { display: none; }
+
+.term-container {
+  position: absolute;
+  inset: 0;
+}
+
+.term-connecting {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--dim);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
+.term-connecting.hidden { display: none; }
 
 #empty-state {
   flex: 1;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,6 +116,58 @@ func TestHandleTerminal_LocalEchoesPTYOutput(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "hello") {
 		t.Fatalf("expected PTY echo to contain %q, got %q", "hello", got)
+	}
+}
+
+func TestHandleTerminal_WarmPTYSkipsSessionLookup(t *testing.T) {
+	registry := webterm.NewRegistry()
+	t.Cleanup(func() { _ = registry.Shutdown() })
+
+	var sessionsFnCalls int32
+	srv := NewServer(
+		func() ([]sessions.Session, error) {
+			atomic.AddInt32(&sessionsFnCalls, 1)
+			// Deliberately return no sessions: if the fast path worked,
+			// this is never consulted, so a real 404 would prove the fast
+			// path was skipped.
+			return nil, nil
+		},
+		WithTerminal(registry),
+	)
+
+	key := webterm.Key{Origin: "", ID: "s1"}
+	if _, err := registry.Attach(key, webterm.Spec{Bin: "sh", Args: []string{"-c", "cat"}}); err != nil {
+		t.Fatalf("pre-attach: %v", err)
+	}
+
+	conn := dialTerminal(t, srv, "/api/terminal/local/s1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := conn.Write(ctx, websocket.MessageBinary, []byte("hi\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	var got []byte
+	for time.Now().Before(deadline) {
+		typ, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if typ != websocket.MessageBinary {
+			continue
+		}
+		got = append(got, data...)
+		if strings.Contains(string(got), "hi") {
+			break
+		}
+	}
+	if !strings.Contains(string(got), "hi") {
+		t.Fatalf("expected PTY echo to contain %q, got %q", "hi", got)
+	}
+	if calls := atomic.LoadInt32(&sessionsFnCalls); calls != 0 {
+		t.Fatalf("sessionsFn called %d times, want 0 (warm-PTY fast path should skip the session lookup)", calls)
 	}
 }
 

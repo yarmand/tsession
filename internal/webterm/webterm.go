@@ -117,6 +117,20 @@ func (r *Registry) Get(key Key) (*Terminal, bool) {
 	return t, ok
 }
 
+// Live returns the Terminal registered for key, but only if it is still
+// running — unlike Get, a closed (but not yet evicted) Terminal is reported
+// as absent. Callers use this to take a fast path that reattaches to an
+// already-warm PTY without needing to rebuild its Spec.
+func (r *Registry) Live(key Key) (*Terminal, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.terms[key]
+	if !ok || t.isClosed() {
+		return nil, false
+	}
+	return t, true
+}
+
 // Close terminates the terminal for key (if any), running its Spec's
 // Teardown, and removes it from the registry.
 func (r *Registry) Close(key Key) error {

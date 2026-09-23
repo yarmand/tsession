@@ -176,7 +176,7 @@ tmux-in-tmux nesting when resuming remote sessions. Full design:
 
 | Package | Responsibility |
 |---|---|
-| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`) or a `*webterm.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`) on `NewServer`. |
+| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`) or a `*webterm.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`) on `NewServer`. `sessioncache.go` holds the stale-while-revalidate cache in front of `SessionsProvider` (see below). |
 | `internal/webterm` | Generic PTY registry keyed by `(origin, sessionID)`. Owns the `creack/pty` file, child process, a 256KB output ring buffer (replayed on reconnect), and fan-out to subscribed WebSocket clients. Knows nothing about tmux or SSH. |
 | `internal/attachcmd` | The only place that knows how to build the command `webterm` runs: grouped-tmux-attach scripts, remote-transport wrapping (via `config.Remote.ResumeCommand()`), and `BuildKill` for teardown (`tmux kill-session`). |
 | `internal/webui/static` | `go:embed`ed frontend: `index.html`, `app.js`, `app.css`, plus vendored `xterm.js`/`xterm.css`/the fit addon under `vendor/` (MIT-licensed, no Node build step, no CDN dependency at runtime). |
@@ -209,6 +209,33 @@ receives these keys):
 Double-clicking a row renames it; right-clicking the repository token sets an
 alias. Any edit to `internal/webui/static/*` must bump `CACHE_NAME` in
 `sw.js`, or the service worker keeps serving the previous app shell.
+
+**Session-list cache and fast reattach:** for remote sessions, the
+`SessionsProvider` does a live SSH round trip (`internal/remote.FetchAll`),
+which can take ~2s — long enough that switching sessions used to visibly
+block on it. `internal/webui/sessioncache.go` wraps it in a
+stale-while-revalidate cache (3s TTL, `Server.SetSessionTTL` as a 0-disables
+test seam) shared by `/api/sessions`, `/api/events`'s poller, rename, and the
+terminal handler's session lookup: a fresh read returns instantly, and a
+stale read returns the last snapshot immediately while kicking off one
+coalesced background refresh. Renaming patches the cached entry's `Name` in
+place (`sessionCache.PatchName`) so it shows up instantly without waiting out
+the TTL or forcing a reload; repository aliases bypass the cache entirely
+(resolved per-request via `aliasesFn`). Separately, `handleTerminal` first
+checks `webterm.Registry.Live` for an already-warm PTY and, if found,
+upgrades and subscribes immediately — skipping the session lookup (and, for
+remote sessions, needing the remote to be reachable at all) whenever you're
+reattaching to a session you've already opened.
+
+**Per-session terminal panes:** the client keeps one xterm instance per
+session (`state.panes`, keyed by session key, LRU-capped at 8) rather than
+resetting and replaying a single shared terminal on every switch. Switching
+sessions just hides the previous pane's DOM node and shows the target's, so
+scrollback and viewport position survive; only the visible pane is ever
+`fit()`. Evicting a pane over the cap just closes its WebSocket — the
+server-side PTY (`webterm.Registry`) stays warm regardless, so a later
+re-attach replays its ring buffer rather than starting over. A small
+"Connecting…" overlay shows per-pane while its socket is still opening.
 
 **Attach model:** local sessions attach through a **grouped tmux session**
 (`tmux new-session -t <original>`, name `tsession-web-<sha256(origin+id)[:12]>`)

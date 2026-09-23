@@ -5,13 +5,17 @@
 
   const REFRESH_INTERVAL_MS = 5000;
   const SIDEBAR_WIDTH_KEY = "tsession-sidebar-width";
+  // Caps how many session terminals stay warm in the browser at once.
+  // Evicting a pane only closes its WebSocket — the server-side PTY stays
+  // warm (see webterm.Registry) and a later re-attach replays its ring
+  // buffer, so this is resource hygiene, not a data-loss risk.
+  const PANE_CAP = 8;
 
   const state = {
     sessions: [],
     selectedKey: null, // `${origin}\u0000${id}`
-    socket: null,
-    term: null,
-    fitAddon: null,
+    panes: new Map(), // sessionKey -> { key, el, term, fitAddon, socket, status, connectingEl }, ordered oldest-first (LRU)
+    activeKey: null, // sessionKey of the currently visible pane
     renameTarget: null, // { kind: "session"|"repo", id, currentName }
     focusTarget: "list", // "list" | "terminal" — see the Focus management section below
     listIndex: 0, // keyboard-navigation cursor row in state.sessions
@@ -300,9 +304,70 @@
     return "\x1b" + base;
   }
 
-  function ensureTerminal() {
-    if (state.term) return;
-    state.term = new Terminal({
+  // touchPane moves key to the most-recently-used end of state.panes (a Map
+  // preserves insertion order, so re-inserting is enough to track LRU order
+  // without a separate timestamp/index).
+  function touchPane(key, pane) {
+    state.panes.delete(key);
+    state.panes.set(key, pane);
+  }
+
+  function activePane() {
+    return state.activeKey ? state.panes.get(state.activeKey) : null;
+  }
+
+  // evictPane tears down a pane's browser-side terminal and socket only.
+  // The server-side PTY (webterm.Registry) is untouched, so a later
+  // re-attach to the same session replays its ring buffer instead of
+  // starting fresh.
+  function evictPane(key) {
+    const pane = state.panes.get(key);
+    if (!pane) return;
+    if (pane.socket) {
+      try { pane.socket.close(); } catch (e) { /* already closing */ }
+    }
+    try { pane.term.dispose(); } catch (e) { /* already disposed */ }
+    pane.el.remove();
+    state.panes.delete(key);
+    if (state.activeKey === key) state.activeKey = null;
+  }
+
+  function evictLRUIfAtCap() {
+    while (state.panes.size >= PANE_CAP) {
+      const oldestKey = state.panes.keys().next().value;
+      if (oldestKey === undefined) return;
+      evictPane(oldestKey);
+    }
+  }
+
+  function updatePaneStatus(pane, status) {
+    pane.status = status;
+    pane.connectingEl.classList.toggle("hidden", status !== "connecting");
+  }
+
+  // ensurePane returns the pane for key, creating (and, if the LRU cap is
+  // full, evicting the oldest other pane) one on first use. It never
+  // touches the network — connectPane does that separately — so switching
+  // back to an already-open pane is just a DOM show/hide plus an xterm
+  // focus, with no socket churn.
+  function ensurePane(key) {
+    const existing = state.panes.get(key);
+    if (existing) return existing;
+
+    evictLRUIfAtCap();
+
+    const el = document.createElement("div");
+    el.className = "term-pane hidden";
+    const termContainer = document.createElement("div");
+    termContainer.className = "term-container";
+    el.appendChild(termContainer);
+    const connectingEl = document.createElement("div");
+    connectingEl.className = "term-connecting hidden";
+    connectingEl.textContent = "Connecting\u2026";
+    el.appendChild(connectingEl);
+    terminalEl.appendChild(el);
+
+    const term = new Terminal({
       convertEol: true,
       cursorBlink: true,
       fontSize: 13.5,
@@ -314,26 +379,27 @@
         "'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
       theme: { background: "#000000" },
     });
-    state.fitAddon = new FitAddon.FitAddon();
-    state.term.loadAddon(state.fitAddon);
-    state.term.open(terminalEl);
-    state.term.onResize(() => sendResize());
-    // Deferring the initial fit to the next frame ensures the container has
-    // already been laid out (it was just unhidden by selectSession), so the
-    // canvas backing store is sized against the real devicePixelRatio
-    // instead of a stale/zero layout, which otherwise shows up as blurry
-    // upscaled text.
-    requestAnimationFrame(() => state.fitAddon.fit());
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(termContainer);
+
+    // pane is assigned below, but these closures capture the *variable*
+    // (not its current value), so they safely see the finished object by
+    // the time the user can trigger them.
+    let pane;
 
     const encoder = new TextEncoder();
-    state.term.onData((data) => {
-      if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+    term.onData((data) => {
+      if (pane.socket && pane.socket.readyState === WebSocket.OPEN) {
         // WebSocket.send(string) always sends a TEXT frame, but the server
         // only treats keystrokes as PTY input on BINARY frames (TEXT frames
         // are parsed as JSON control messages, e.g. resize) — so keystrokes
         // must be sent as bytes, not as a string.
-        state.socket.send(encoder.encode(data));
+        pane.socket.send(encoder.encode(data));
       }
+    });
+    term.onResize(() => {
+      if (pane.key === state.activeKey) sendResize(pane);
     });
 
     // xterm.js only routes keydown to the PTY when its own hidden textarea
@@ -341,7 +407,7 @@
     // internal handling; stopping propagation here keeps page-level
     // shortcuts (rename modal Escape, etc.) from also reacting to keys the
     // user is sending to the terminal.
-    state.term.attachCustomKeyEventHandler((ev) => {
+    term.attachCustomKeyEventHandler((ev) => {
       if (ev.type === "keydown") {
         const seq = altEscapeSequence(ev);
         if (seq !== null) {
@@ -353,8 +419,8 @@
           // original key for punctuation. Returning false tells xterm not
           // to process this event any further itself.
           ev.preventDefault();
-          if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-            state.socket.send(encoder.encode(seq));
+          if (pane.socket && pane.socket.readyState === WebSocket.OPEN) {
+            pane.socket.send(encoder.encode(seq));
           }
           ev.stopPropagation();
           return false;
@@ -364,13 +430,72 @@
       return true; // let xterm handle it normally
     });
 
-    const resizeObserver = new ResizeObserver(() => {
-      if (state.fitAddon) state.fitAddon.fit();
+    pane = { key, el, term, fitAddon, socket: null, status: "connecting", connectingEl };
+    state.panes.set(key, pane);
+    return pane;
+  }
+
+  // connectPane opens (or reopens, e.g. via the banner's Retry button) pane's
+  // WebSocket. It is a no-op while a socket is already open or connecting,
+  // so reselecting an already-live session never churns the network.
+  function connectPane(pane, s) {
+    if (pane.socket) return;
+    updatePaneStatus(pane, "connecting");
+
+    const originSegment = s.origin ? encodeURIComponent(s.origin) : "local";
+    const url = wsScheme() + "//" + location.host + "/api/terminal/" + originSegment + "/" + encodeURIComponent(s.id);
+    const socket = new WebSocket(url);
+    socket.binaryType = "arraybuffer";
+    pane.socket = socket;
+
+    socket.addEventListener("open", () => {
+      updatePaneStatus(pane, "open");
+      if (pane.key === state.activeKey) {
+        sendResize(pane);
+        focusTerminal();
+      }
     });
-    resizeObserver.observe(terminalEl);
-    window.addEventListener("resize", () => {
-      if (state.fitAddon) state.fitAddon.fit();
+    socket.addEventListener("message", (ev) => {
+      if (typeof ev.data === "string") {
+        pane.term.write(ev.data);
+      } else {
+        pane.term.write(new Uint8Array(ev.data));
+      }
     });
+    socket.addEventListener("close", (ev) => {
+      if (pane.socket === socket) {
+        pane.socket = null;
+        updatePaneStatus(pane, "closed");
+        if (pane.key === state.activeKey) {
+          showBanner("Connection closed" + (ev.reason ? ": " + ev.reason : "") + ".");
+        }
+      }
+    });
+    socket.addEventListener("error", () => {
+      if (pane.socket === socket) {
+        updatePaneStatus(pane, "error");
+        if (pane.key === state.activeKey) {
+          showBanner("Failed to connect to session.");
+        }
+      }
+    });
+  }
+
+  // showPane hides the previously active pane (if any) and reveals key's,
+  // without resetting or re-replaying its contents — this is what preserves
+  // scrollback and viewport position across switches. Fitting only ever
+  // happens for the pane that is actually visible; a hidden pane has zero
+  // layout size and would compute a garbage geometry.
+  function showPane(key) {
+    const pane = state.panes.get(key);
+    if (state.activeKey && state.activeKey !== key) {
+      const prev = state.panes.get(state.activeKey);
+      if (prev) prev.el.classList.add("hidden");
+    }
+    state.activeKey = key;
+    pane.el.classList.remove("hidden");
+    touchPane(key, pane);
+    requestAnimationFrame(() => pane.fitAddon.fit());
   }
 
   function showBanner(message) {
@@ -403,47 +528,16 @@
     terminalEl.classList.remove("hidden");
     bannerEl.classList.add("hidden");
 
-    ensureTerminal();
-    state.term.reset();
-
-    if (state.socket) {
-      state.socket.close();
-      state.socket = null;
-    }
-
-    const originSegment = s.origin ? encodeURIComponent(s.origin) : "local";
-    const url = wsScheme() + "//" + location.host + "/api/terminal/" + originSegment + "/" + encodeURIComponent(s.id);
-    const socket = new WebSocket(url);
-    socket.binaryType = "arraybuffer";
-    state.socket = socket;
-
-    socket.addEventListener("open", () => {
-      sendResize();
-      focusTerminal();
-    });
-    socket.addEventListener("message", (ev) => {
-      if (typeof ev.data === "string") {
-        state.term.write(ev.data);
-      } else {
-        state.term.write(new Uint8Array(ev.data));
-      }
-    });
-    socket.addEventListener("close", (ev) => {
-      if (state.socket === socket) {
-        showBanner("Connection closed" + (ev.reason ? ": " + ev.reason : "") + ".");
-      }
-    });
-    socket.addEventListener("error", () => {
-      if (state.socket === socket) {
-        showBanner("Failed to connect to session.");
-      }
-    });
+    const pane = ensurePane(state.selectedKey);
+    showPane(state.selectedKey);
+    connectPane(pane, s);
+    if (pane.status === "open") focusTerminal();
   }
 
-  function sendResize() {
-    if (!state.socket || state.socket.readyState !== WebSocket.OPEN || !state.term) return;
-    const msg = JSON.stringify({ type: "resize", cols: state.term.cols, rows: state.term.rows });
-    state.socket.send(msg);
+  function sendResize(pane) {
+    if (!pane || !pane.socket || pane.socket.readyState !== WebSocket.OPEN) return;
+    const msg = JSON.stringify({ type: "resize", cols: pane.term.cols, rows: pane.term.rows });
+    pane.socket.send(msg);
   }
 
   // --- Focus management: Alt+/ toggles keyboard focus between the session
@@ -458,7 +552,8 @@
   function focusTerminal() {
     state.focusTarget = "terminal";
     state.sidebarOverlay = false;
-    if (state.term && state.selectedSession) state.term.focus();
+    const pane = activePane();
+    if (pane && state.selectedSession) pane.term.focus();
     updateSidebarState();
     updateFocusIndicator();
   }
@@ -466,7 +561,8 @@
   function focusList() {
     state.focusTarget = "list";
     if (state.sidebarCollapsed) state.sidebarOverlay = true;
-    if (state.term) state.term.blur();
+    const pane = activePane();
+    if (pane) pane.term.blur();
     if (state.listIndex == null) state.listIndex = 0;
     updateSidebarState();
     updateFocusIndicator();
@@ -641,6 +737,21 @@
   );
 
   terminalEl.addEventListener("click", focusTerminal);
+
+  // Fitting is deliberately scoped to whichever pane is currently visible:
+  // a hidden pane has zero layout size, so fitting it would compute a
+  // garbage geometry. Panes that become visible later are fit explicitly
+  // by showPane.
+  const terminalResizeObserver = new ResizeObserver(() => {
+    const pane = activePane();
+    if (pane) pane.fitAddon.fit();
+  });
+  terminalResizeObserver.observe(terminalEl);
+  window.addEventListener("resize", () => {
+    const pane = activePane();
+    if (pane) pane.fitAddon.fit();
+  });
+
   sessionsEl.addEventListener("click", (ev) => {
     if (ev.target.closest(".session-row")) return;
     if (state.focusTarget !== "list") focusList();

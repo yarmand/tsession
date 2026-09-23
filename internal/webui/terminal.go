@@ -47,50 +47,61 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		origin = ""
 	}
 
-	target, err := s.findSession(origin, id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if target == nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
+	key := webterm.Key{Origin: origin, ID: id}
 
-	var remote config.Remote
-	if origin != "" {
-		remote, err = s.resolveRemote(origin)
+	// Fast path: a PTY for this session may already be warm from an
+	// earlier attach. In that case we don't need the session list at all
+	// (findSession), or its remote/attach-command derivation — those are
+	// only needed to *spawn* a terminal, not to reattach to one that's
+	// already running. This is what makes reattaching independent of the
+	// session-list load (and, for remote sessions, of the remote being
+	// reachable right now).
+	term, ok := s.registry.Live(key)
+	if !ok {
+		target, err := s.findSession(origin, id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if target == nil {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+
+		var remote config.Remote
+		if origin != "" {
+			remote, err = s.resolveRemote(origin)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
+		bin, args, err := attachcmd.Build(*target, remote)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-	}
 
-	bin, args, err := attachcmd.Build(*target, remote)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	sess := *target
-	rem := remote
-	teardown := func() error {
-		killBin, killArgs, ok, err := attachcmd.BuildKill(sess, rem)
-		if err != nil || !ok {
+		sess := *target
+		rem := remote
+		teardown := func() error {
+			killBin, killArgs, ok, err := attachcmd.BuildKill(sess, rem)
+			if err != nil || !ok {
+				return nil
+			}
+			// Best-effort: the grouped/standalone web tmux session may
+			// already be gone (e.g. the user killed it directly), so a
+			// non-zero exit here is expected and not reported as an error.
+			_ = exec.Command(killBin, killArgs...).Run()
 			return nil
 		}
-		// Best-effort: the grouped/standalone web tmux session may already
-		// be gone (e.g. the user killed it directly), so a non-zero exit
-		// here is expected and not reported as an error.
-		_ = exec.Command(killBin, killArgs...).Run()
-		return nil
-	}
 
-	key := webterm.Key{Origin: origin, ID: id}
-	term, err := s.registry.Attach(key, webterm.Spec{Bin: bin, Args: args, Rows: 24, Cols: 80, Teardown: teardown})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		term, err = s.registry.Attach(key, webterm.Spec{Bin: bin, Args: args, Rows: 24, Cols: 80, Teardown: teardown})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	conn, err := websocket.Accept(w, r, nil)
@@ -130,7 +141,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 // findSession returns the session matching (origin, id) in the current
 // session list, or nil if none matches.
 func (s *Server) findSession(origin, id string) (*sessions.Session, error) {
-	all, err := s.sessionsFn()
+	all, err := s.sessionCache.Get()
 	if err != nil {
 		return nil, err
 	}

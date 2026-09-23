@@ -42,13 +42,17 @@ func (s *Server) handleRenameSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Patch the cached snapshot in place so the new name shows up
+	// immediately in /api/sessions rather than waiting out the cache TTL
+	// (which would otherwise require another expensive SSH-backed reload).
+	s.sessionCache.PatchName(id, req.Name)
 
 	// Best-effort: also rename the live tmux session, mirroring
 	// `tsession rename`'s behavior, so the native tmux client's status bar
 	// picks up the new name too. A lookup miss (session has no live tmux
 	// pane, or the sessions provider errors) is not fatal to the rename.
 	if req.Name != "" {
-		if all, err := s.sessionsFn(); err == nil {
+		if all, err := s.sessionCache.Get(); err == nil {
 			for _, sess := range all {
 				if sess.ID == id && sess.TmuxName != "" {
 					_ = tmuxRenameSessionFn(sess.TmuxName, req.Name)
@@ -130,7 +134,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) emitEvents(w http.ResponseWriter, flusher http.Flusher) {
-	all, err := s.sessionsFn()
+	all, err := s.sessionCache.Get()
 	if err != nil {
 		return
 	}

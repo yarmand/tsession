@@ -134,6 +134,7 @@ func TestHandleEvents_StreamsNotifyTransition(t *testing.T) {
 	})
 	srv.SetNotifyStorePath(dir + "/notify-web.json")
 	srv.SetPollInterval(5 * time.Millisecond)
+	srv.SetSessionTTL(0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
@@ -175,6 +176,7 @@ func TestHandleEvents_NoTransitionsProducesNoFrames(t *testing.T) {
 	})
 	srv.SetNotifyStorePath(dir + "/notify-web.json")
 	srv.SetPollInterval(5 * time.Millisecond)
+	srv.SetSessionTTL(0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)

@@ -54,6 +54,8 @@ type Server struct {
 	registry   *webterm.Registry
 	now        func() time.Time
 
+	sessionCache *sessionCache
+
 	notifyStorePath string
 	pollInterval    time.Duration
 }
@@ -92,6 +94,7 @@ func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
 		notifyStorePath: defaultNotifyStorePath(),
 		pollInterval:    3 * time.Second,
 	}
+	s.sessionCache = newSessionCache(sessionsFn, s.now)
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -107,6 +110,14 @@ func (s *Server) SetNotifyStorePath(path string) { s.notifyStorePath = path }
 // list for done/question transitions. Tests use a short interval to avoid
 // slow test runs; production callers can leave the 3s default.
 func (s *Server) SetPollInterval(d time.Duration) { s.pollInterval = d }
+
+// SetSessionTTL overrides how long a loaded session list is considered
+// fresh before a read triggers a background refresh (see sessionCache).
+// 0 disables caching entirely — every read loads synchronously. Tests that
+// assert on session-list transitions within a few milliseconds (faster than
+// a real SSH-backed load could ever complete) need this to keep observing
+// every change; production callers can leave the 3s default.
+func (s *Server) SetSessionTTL(d time.Duration) { s.sessionCache.SetTTL(d) }
 
 // Handler returns an http.Handler serving this Server's API routes, mounted
 // at their final paths (e.g. "/api/sessions"). Callers combine it with
@@ -151,7 +162,7 @@ type SessionsResponse struct {
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	all, err := s.sessionsFn()
+	all, err := s.sessionCache.Get()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -74,8 +74,7 @@ func TestStaticAssets_ServesPWAIcons(t *testing.T) {
 	}
 }
 
-func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {
-	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -155,5 +154,73 @@ func TestStaticAssets_ServiceWorkerPrefersFreshShellAssets(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "return network.catch(() => cached)") {
 		t.Fatal("service worker is not network-first for shell assets")
+	}
+}
+
+func TestStaticAssets_CodePaneLayoutPresent(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	indexReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	indexRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(indexRec, indexReq)
+	for _, want := range []string{
+		`id="terminal-wrap"`,
+		`id="code-resize"`,
+		`id="code-pane"`,
+		`id="code-pane-header"`,
+		`id="code-pane-label"`,
+		`id="code-pane-status"`,
+		`id="code-pane-close"`,
+		`id="code-pane-body"`,
+	} {
+		if !strings.Contains(indexRec.Body.String(), want) {
+			t.Fatalf("index.html missing %q", want)
+		}
+	}
+
+	cssReq := httptest.NewRequest(http.MethodGet, "/app.css", nil)
+	cssRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(cssRec, cssReq)
+	for _, want := range []string{"--code-width", "#code-resize", ".code-frame"} {
+		if !strings.Contains(cssRec.Body.String(), want) {
+			t.Fatalf("app.css missing %q", want)
+		}
+	}
+
+	jsReq := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	jsRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(jsRec, jsReq)
+	for _, want := range []string{"setCodeWidth", "restoreCodeWidth", "tsession-code-width"} {
+		if !strings.Contains(jsRec.Body.String(), want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+}
+
+func TestStaticAssets_CodeViewAltEBehaviourPresent(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	jsReq := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	jsRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(jsRec, jsReq)
+	body := jsRec.Body.String()
+	for _, want := range []string{
+		`ev.code === "KeyE"`,
+		"toggleCodeView",
+		"closeCodeView",
+		"renderCodePane",
+		"/api/codeserver/",
+		`method: "DELETE"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+
+	indexReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	indexRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(indexRec, indexReq)
+	if !strings.Contains(indexRec.Body.String(), "Alt+E code view") {
+		t.Fatal("session list hint does not mention Alt+E")
 	}
 }

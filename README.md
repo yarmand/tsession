@@ -87,16 +87,30 @@ Useful controls:
 |---|---|
 | `Alt+/` | Toggle focus between the session list and terminal |
 | `Alt+H` | Collapse or restore the session list |
+| `Alt+E` | Toggle a VS Code (`code serve-web`) pane for the highlighted session |
 | `↑` / `↓` | Move through the focused session list |
 | `Enter` | Open the highlighted session |
 | `F2` | Rename the selected session |
 | Top-left button | Collapse or restore the session list |
 | Drag the list edge | Resize the session list; the width is remembered |
+| Drag the code pane edge | Resize the code pane; the width is remembered |
 
 When the list is collapsed, `Alt+/` opens it as an overlay without resizing
 the terminal. Selecting a session closes the overlay automatically. Remote
 origins receive distinct colors so sessions from different hosts remain easy
 to identify.
+
+`Alt+E` (with the session list focused) opens a code editor pane docked to
+the right of the terminal, backed by a `code serve-web` instance scoped to
+that session's working directory. It is off by default, per session:
+switching sessions hides the pane without stopping VS Code, and switching
+back shows it again instantly, without relaunching. The ✕ button in the
+pane's header is the only thing that stops it. This works for local sessions
+and for SSH, Codespaces, and devcontainer remotes alike — remote sessions
+reach their `code serve-web` instance through the same server, tunnelling
+or relaying the connection as needed. See
+[docs/superpowers/specs/2026-09-18-code-view-design.md](docs/superpowers/specs/2026-09-18-code-view-design.md)
+for the full design.
 
 ### 3. Add an SSH host
 
@@ -310,6 +324,11 @@ remotes:
   - name: offline
     host: offline.example.com
     active: false
+
+# Optional: override the `code` binary used by Alt+E's code view (see
+# above). Unset resolves "code" from PATH — locally via the shell, remotely
+# via the remote's own interactive login shell.
+code_command: /usr/local/bin/code
 ```
 
 | Field | Required | Default | Description |
@@ -322,6 +341,7 @@ remotes:
 | `codespace` | Codespace | — | Codespace name |
 | `container` | Devcontainer | — | Docker container name |
 | `user` | No | — | User passed to `docker exec` |
+| `code_command` | No | top-level `code_command`, or `code` from PATH | Per-remote override of the `code` binary for this remote's code view |
 ### Remote discovery
 
 For each enabled remote, `tsession`:

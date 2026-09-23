@@ -176,9 +176,12 @@ tmux-in-tmux nesting when resuming remote sessions. Full design:
 
 | Package | Responsibility |
 |---|---|
-| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`) or a `*webterm.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`) on `NewServer`. `sessioncache.go` holds the stale-while-revalidate cache in front of `SessionsProvider` (see below). |
+| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`) or a `*webterm.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`) on `NewServer`. |
+| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket), `/api/codeserver/{origin}/{id}` (start/status/stop), `/api/code/{key}/...` (reverse proxy). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`, `CodeConfigProvider`) or a `*webterm.Registry`/`*codeserver.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`, `WithCodeServer`) on `NewServer`. |
 | `internal/webterm` | Generic PTY registry keyed by `(origin, sessionID)`. Owns the `creack/pty` file, child process, a 256KB output ring buffer (replayed on reconnect), and fan-out to subscribed WebSocket clients. Knows nothing about tmux or SSH. |
-| `internal/attachcmd` | The only place that knows how to build the command `webterm` runs: grouped-tmux-attach scripts, remote-transport wrapping (via `config.Remote.ResumeCommand()`), and `BuildKill` for teardown (`tmux kill-session`). |
+| `internal/attachcmd` | The only place that knows how to build the command `webterm` runs: grouped-tmux-attach scripts, remote-transport wrapping (via `shellutil.WrapRemoteTransport`), and `BuildKill` for teardown (`tmux kill-session`). |
+| `internal/codecmd` | Pure command builder (no process I/O) for the code view: `Key(origin, id)` (opaque URL key), `Build(...)` (the `code serve-web` launch command, local or remote-transport-wrapped), and `TunnelCommand(...)` (ssh -L / `gh codespace ports forward` for reaching a remote instance's port). |
+| `internal/codeserver` | Registry of long-lived `code serve-web` child processes keyed by `(origin, sessionID)`, mirroring `internal/webterm`'s architecture: PTY-backed launch (so remote transports needing a tty work and stdout+stderr combine into one stream), ANSI-stripped port-scanning of the "Web UI available at" line, a bounded log ring, and per-transport dialing (`LocalDialer`, `RemoteTunnelDialer` for ssh/codespace, `DevcontainerDialer` for a per-connection `docker exec -i` stdio relay since `docker exec` has no port-forwarding primitive). `Registry.Start` is idempotent while an instance is starting/running — this is what makes reactivating a session with an existing code view reuse it instead of relaunching. |
 | `internal/webui/static` | `go:embed`ed frontend: `index.html`, `app.js`, `app.css`, plus vendored `xterm.js`/`xterm.css`/the fit addon under `vendor/` (MIT-licensed, no Node build step, no CDN dependency at runtime). |
 
 The web/GUI session list uses per-remote label colors. `Alt+H` (or the
@@ -265,3 +268,45 @@ call.
 `::1`, or literal `localhost`); anything else is rejected before the listener
 binds. There is no auth, TLS, or non-loopback access in v1 — PTYs must never
 be reachable off-host.
+
+### Code view (`Alt+E`)
+
+An optional VS Code (`code serve-web`) pane, docked to the right of the
+terminal via a resizable divider, toggled with `Alt+E` while the session list
+is focused. Full design: `docs/superpowers/specs/2026-09-18-code-view-design.md`.
+
+It mirrors the terminal's own three-layer split — `internal/codecmd` (pure
+command building) → `internal/codeserver` (process registry) →
+`internal/webui`'s `/api/codeserver/*` and `/api/code/{key}/...` routes — so
+each layer is unit-testable without a live `code` binary or remote host.
+
+**Reaching the instance:** `code serve-web` is launched with
+`--server-base-path /api/code/<key>` (where `key = sha256(origin + id)[:6]`
+hex-encoded), so it emits URLs already prefixed with that path. `/api/code/{key}/...`
+is a same-origin `httputil.ReverseProxy` whose `Transport.DialContext` always
+calls the target `codeserver.Instance.Dial()` regardless of the requested
+address — this is what lets the same proxy code serve a direct loopback dial
+(local), an established ssh/codespace tunnel's local end (`RemoteTunnelDialer`),
+or a fresh per-connection `docker exec` stdio relay (`DevcontainerDialer`)
+uniformly. The request path is forwarded unmodified (no path rewriting), which
+is why `--server-base-path` must match `/api/code/<key>` exactly.
+
+**Per-session, not per-connection:** `state.codeViews` in `app.js` keeps one
+retained `<iframe>` per session key, created once and only ever shown/hidden
+— never destroyed or reloaded — so switching sessions preserves editor state
+and switching back is instant. Only the pane's ✕ button issues `DELETE
+/api/codeserver/{origin}/{id}`, which is the only thing that stops VS Code;
+switching sessions just hides the pane. `POST /api/codeserver/{origin}/{id}`
+(re)starts or reuses (never relaunches, per `codeserver.Registry.Start`'s
+idempotency) the session's instance; `GET` reports `starting`/`running`/
+`failed`/`stopped` plus a captured log tail, polled by the frontend while
+starting (VS Code's first run downloads the server build and can take
+minutes).
+
+**Config:** the `code` binary is resolved the same way as the terminal
+attach's `copilot`/`pi` resolution — top-level `code_command` or a
+per-remote `code_command` override in `~/.config/tsession/config.yaml`
+(`config.Remote.CodeBinary`), otherwise `code` from PATH (locally via
+`exec.LookPath`, remotely via `shellutil.CodeResolverCommand()` sourcing the
+remote's own interactive login shell).
+

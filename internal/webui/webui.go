@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
+	"github.com/yarma/tsession/internal/codeserver"
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
@@ -58,6 +60,14 @@ type Server struct {
 
 	notifyStorePath string
 	pollInterval    time.Duration
+
+	codeRegistry *codeserver.Registry
+	codeCfgFn    CodeConfigProvider
+	codeDataDir  string
+
+	codeKeysMu     sync.Mutex
+	codeKeys       map[string]codeserver.Key
+	codeTransports map[string]*http.Transport
 }
 
 // Option configures optional Server dependencies not every caller needs
@@ -93,6 +103,9 @@ func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
 		now:             time.Now,
 		notifyStorePath: defaultNotifyStorePath(),
 		pollInterval:    3 * time.Second,
+		codeDataDir:     defaultCodeDataDir(),
+		codeKeys:        make(map[string]codeserver.Key),
+		codeTransports:  make(map[string]*http.Transport),
 	}
 	s.sessionCache = newSessionCache(sessionsFn, s.now)
 	for _, opt := range opts {
@@ -129,6 +142,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/repos/alias", s.handleRepoAlias)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/terminal/{origin}/{id}", s.handleTerminal)
+	mux.HandleFunc("POST /api/codeserver/{origin}/{id}", s.handleCodeServerStart)
+	mux.HandleFunc("GET /api/codeserver/{origin}/{id}", s.handleCodeServerStatus)
+	mux.HandleFunc("DELETE /api/codeserver/{origin}/{id}", s.handleCodeServerStop)
+	mux.HandleFunc("/api/code/{key}/", s.handleCodeProxy)
 	mux.Handle("/", staticHandler())
 	return mux
 }

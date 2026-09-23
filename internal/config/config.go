@@ -11,19 +11,40 @@ import (
 const defaultCopilotDir = "~/.copilot"
 
 type Remote struct {
-	Name       string
-	Active     bool
-	Type       string // "ssh" (default), "codespace", "devcontainer"
-	Host       string
-	CopilotDir string
-	SSHCommand string // custom override — defaults based on Type
-	Codespace  string // codespace name (type=codespace)
-	Container  string // container name (type=devcontainer)
-	User       string // user for docker exec (type=devcontainer)
+	Name        string
+	Active      bool
+	Type        string // "ssh" (default), "codespace", "devcontainer"
+	Host        string
+	CopilotDir  string
+	SSHCommand  string // custom override — defaults based on Type
+	Codespace   string // codespace name (type=codespace)
+	Container   string // container name (type=devcontainer)
+	User        string // user for docker exec (type=devcontainer)
+	CodeCommand string // path to the `code` (VS Code CLI) binary on this remote; overrides Config.CodeCommand
 }
 
 type Config struct {
 	Remotes []Remote
+
+	// CodeCommand is the default path to the `code` (VS Code CLI) binary
+	// used to launch `code serve-web`. Empty means resolve `code` from
+	// PATH (locally via exec.LookPath, remotely via
+	// shellutil.CodeResolverCommand). A remote may override this with its
+	// own code_command.
+	CodeCommand string
+}
+
+// CodeBinary returns the `code` binary path to use for this remote: its own
+// CodeCommand override if set, otherwise the top-level default from cfg (may
+// be empty, meaning "resolve from PATH").
+func (r Remote) CodeBinary(cfg *Config) string {
+	if r.CodeCommand != "" {
+		return r.CodeCommand
+	}
+	if cfg != nil {
+		return cfg.CodeCommand
+	}
+	return ""
 }
 
 // Endpoint returns the configured host/container identifier used to connect
@@ -132,7 +153,10 @@ func LoadFrom(path string) (*Config, error) {
 }
 
 // parse does minimal YAML parsing for our flat structure.
-// We avoid a YAML dependency since the format is simple and stable.
+// We avoid a YAML dependency since the format is simple and stable. A
+// top-level `code_command:` scalar (indent 0) sets Config.CodeCommand; a
+// nested `code_command:` under a remote entry overrides it for that remote
+// only (see Remote.CodeBinary).
 func parse(s string) (*Config, error) {
 	cfg := &Config{}
 	lines := strings.Split(s, "\n")
@@ -147,6 +171,13 @@ func parse(s string) (*Config, error) {
 		indent := len(line) - len(strings.TrimLeft(line, " \t"))
 
 		if trimmed == "remotes:" {
+			continue
+		}
+
+		// Top-level scalars (indent 0) apply to Config itself, not the
+		// current remote list entry.
+		if indent == 0 && strings.HasPrefix(trimmed, "code_command:") {
+			cfg.CodeCommand = extractValue(trimmed[len("code_command:"):])
 			continue
 		}
 
@@ -188,6 +219,8 @@ func parse(s string) (*Config, error) {
 				current.Container = extractValue(trimmed[len("container:"):])
 			case strings.HasPrefix(trimmed, "user:"):
 				current.User = extractValue(trimmed[len("user:"):])
+			case strings.HasPrefix(trimmed, "code_command:"):
+				current.CodeCommand = extractValue(trimmed[len("code_command:"):])
 			}
 		}
 	}

@@ -89,6 +89,32 @@
     return Math.floor(days / 7) + "w";
   }
 
+  // worktreeTooltip explains what the leading row token actually is. A
+  // custom name replaces the worktree folder in the row, so the tooltip is
+  // the only place the folder still shows up at a glance.
+  function worktreeTooltip(s) {
+    const parts = [];
+    if (s.name) parts.push("Name: " + s.name);
+    if (s.worktree) parts.push("Worktree: " + s.worktree);
+    if (s.cwd) parts.push(s.cwd);
+    return parts.join("\n");
+  }
+
+  // Go marshals an unset time.Time as "0001-01-01T00:00:00Z", which is a
+  // non-empty (truthy) string — so `lastEventAt || updatedAt` would pick the
+  // zero value and render a nonsense age. Treat anything before 1971 as
+  // unset.
+  function sessionTimestamp(s) {
+    const usable = (iso) => {
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return !Number.isNaN(t) && t > 31536000000;
+    };
+    if (usable(s.lastEventAt)) return s.lastEventAt;
+    if (usable(s.updatedAt)) return s.updatedAt;
+    return "";
+  }
+
   function renderSessions() {
     listEl.innerHTML = "";
     const colors = remoteColors();
@@ -123,15 +149,30 @@
         : "Local session";
       line1.appendChild(location);
 
+      // Several sessions often share one repository but live in different
+      // worktrees, so the worktree folder (or the session's custom name)
+      // leads the row — it is what actually tells them apart.
+      const worktree = document.createElement("span");
+      worktree.className = "worktree" + (s.name ? " named" : "");
+      worktree.textContent = s.name || s.worktree || s.id;
+      worktree.title = worktreeTooltip(s);
+      line1.appendChild(worktree);
+
       const repo = document.createElement("span");
       repo.className = "repo";
-      repo.textContent = s.repository || s.cwd || s.id;
-      repo.title = "Double-click a row to rename the session; right-click the repository name to set an alias.";
-      line1.appendChild(repo);
+      repo.textContent = s.repository || "";
+      repo.title = "Repository " + (s.repository || "") +
+        " \u2014 right-click (or ctrl-a with the list focused) to set an alias.";
+      // Mirrors --short rendering: when the repository label and the
+      // worktree name are the same word, showing it twice just steals room
+      // from the token that distinguishes sessions.
+      if (s.repository && s.repository !== worktree.textContent) {
+        line1.appendChild(repo);
+      }
 
       const age = document.createElement("span");
       age.className = "age";
-      age.textContent = formatAge(s.lastEventAt || s.updatedAt);
+      age.textContent = formatAge(sessionTimestamp(s));
       line1.appendChild(age);
 
       li.appendChild(line1);
@@ -149,7 +190,8 @@
       repo.addEventListener("contextmenu", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        openRenameModal("repo", s.repositoryId || s.repository, s.repository || "");
+        if (!s.repositoryId) return;
+        openRenameModal("repo", s.repositoryId, s.repository || "");
       });
       listEl.appendChild(li);
     });
@@ -187,7 +229,9 @@
 
     addInfoRow("ID", infoValue(s.id));
     addInfoRow("State", infoValue(s.state));
-    addInfoRow("Age", infoValue(formatAge(s.lastEventAt || s.updatedAt)));
+    addInfoRow("Age", infoValue(formatAge(sessionTimestamp(s))));
+    addInfoRow("Name", infoValue(s.name, "(unnamed)"));
+    addInfoRow("Worktree", infoValue(s.worktree));
     addInfoRow("CWD", infoValue(s.cwd));
     addInfoRow("Repo", infoValue(s.repository));
     addInfoRow("Source", infoValue(s.source));
@@ -493,6 +537,24 @@
     if (s) selectSession(s);
   }
 
+  function cursorSession() {
+    if (state.listIndex == null) return null;
+    return state.sessions[state.listIndex] || null;
+  }
+
+  // renameCursorSession/renameCursorRepo mirror the TUI picker's ctrl-n /
+  // ctrl-a bindings, acting on the keyboard cursor row.
+  function renameCursorSession() {
+    const s = cursorSession();
+    if (s) openRenameModal("session", s.id, s.name || "");
+  }
+
+  function renameCursorRepo() {
+    const s = cursorSession();
+    if (!s || !s.repositoryId) return;
+    openRenameModal("repo", s.repositoryId, s.repository || "");
+  }
+
   const SUPPRESSABLE_KEYS = new Set([
     "f", "s", "p", "g", "k", "l", "o", "d", "u", "j", "e", "h", "n", "1", "2", "3", "4", "5", "6", "7", "8", "9",
   ]);
@@ -500,6 +562,19 @@
   document.addEventListener(
     "keydown",
     (ev) => {
+      // While the rename modal is open it owns the keyboard (its input has
+      // its own Enter/Escape handling); don't let page shortcuts fire too.
+      // Escape is still honored here so the modal closes even if focus has
+      // drifted off its input.
+      if (state.renameTarget) {
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          ev.stopPropagation();
+          closeRenameModal();
+        }
+        return;
+      }
+
       const key = ev.key.toLowerCase();
       const mod = ev.metaKey || ev.ctrlKey;
 
@@ -532,6 +607,20 @@
       }
 
       if (state.focusTarget === "list") {
+        if (ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+          if (ev.code === "KeyN") {
+            ev.preventDefault();
+            ev.stopPropagation();
+            renameCursorSession();
+            return;
+          }
+          if (ev.code === "KeyA") {
+            ev.preventDefault();
+            ev.stopPropagation();
+            renameCursorRepo();
+            return;
+          }
+        }
         switch (ev.key) {
           case "ArrowDown":
             ev.preventDefault();
@@ -587,6 +676,7 @@
   function openRenameModal(kind, id, currentName) {
     state.renameTarget = { kind, id, currentName };
     renameTitle.textContent = kind === "repo" ? "Rename repository" : "Rename session";
+    renameTitle.title = id || "";
     renameInput.value = currentName;
     renameError.classList.add("hidden");
     renameModal.classList.remove("hidden");
@@ -636,8 +726,9 @@
   });
 
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "F2" && state.selectedSession) {
-      openRenameModal("session", state.selectedSession.id, state.selectedSession.name || "");
+    if (ev.key === "F2" && !state.renameTarget) {
+      ev.preventDefault();
+      renameCursorSession();
     }
   });
 

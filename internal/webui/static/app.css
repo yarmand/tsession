@@ -96,14 +96,18 @@ body.resizing-sidebar {
 }
 
 #sessions-hint {
-  min-height: 28px;
-  padding: 6px 10px 4px 34px;
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  padding: 6px 10px;
   font-size: 10px;
   color: var(--dim);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+
+.hint-item {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 #sessions.panel-focused,
@@ -117,7 +121,7 @@ body.resizing-sidebar {
   overflow-y: auto;
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 28px 0 0;
 }
 
 #session-info {
@@ -196,8 +200,29 @@ body.resizing-sidebar {
 .session-row .glyph.exited,
 .session-row .glyph.unknown { color: var(--idle); }
 
-.session-row .repo {
+.session-row .worktree {
   font-weight: 600;
+  /* The worktree is the token that distinguishes sessions sharing a
+     repository, so it never gives up space: it claims what is left after
+     the fixed columns and the repo label (below) shrinks away first. */
+  flex: 1 0 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A custom name stands in for the worktree folder; italics keep the two
+   visually distinct without adding a second token to the row. */
+.session-row .worktree.named {
+  font-style: italic;
+}
+
+.session-row .repo {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  color: var(--dim);
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
 }

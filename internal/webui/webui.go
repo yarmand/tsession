@@ -135,6 +135,7 @@ type SessionView struct {
 	Name         string    `json:"name"`
 	Repository   string    `json:"repository"`
 	RepositoryID string    `json:"repositoryId"`
+	Worktree     string    `json:"worktree"`
 	CWD          string    `json:"cwd"`
 	Summary      string    `json:"summary"`
 	UpdatedAt    time.Time `json:"updatedAt"`
@@ -201,9 +202,10 @@ func BuildSessionViews(active []sessions.Session, ctx render.ShortContext) []Ses
 }
 
 func sessionView(s sessions.Session, ctx render.ShortContext) SessionView {
+	worktree := render.WorktreeName(s)
 	repo := ctx.RepositoryLabel(s)
 	if repo == "" {
-		repo = render.WorktreeName(s)
+		repo = worktree
 	}
 
 	hasTmux := s.Origin == "" && (s.TmuxTarget != "" || s.TmuxName != "") || s.Origin != "" && s.RemoteTmuxAvailable
@@ -221,6 +223,7 @@ func sessionView(s sessions.Session, ctx render.ShortContext) SessionView {
 		Name:         s.Name,
 		Repository:   repo,
 		RepositoryID: s.Repository,
+		Worktree:     worktree,
 		CWD:          s.CWD,
 		Summary:      s.Summary,
 		UpdatedAt:    s.UpdatedAt,

@@ -63,6 +63,9 @@ func TestHandleSessions_FiltersAndShapesPayload(t *testing.T) {
 	if local.Repository != "myalias" {
 		t.Errorf("active-local.Repository = %q, want myalias (aliased)", local.Repository)
 	}
+	if local.Worktree != "repo" {
+		t.Errorf("active-local.Worktree = %q, want repo (basename of CWD)", local.Worktree)
+	}
 	if !local.HasTmux {
 		t.Error("active-local.HasTmux = false, want true (has TmuxTarget)")
 	}
@@ -159,5 +162,36 @@ func TestHandleSessions_EmptyListReturnsEmptyArray(t *testing.T) {
 	}
 	if len(resp.Sessions) != 0 {
 		t.Errorf("expected 0 sessions, got %d", len(resp.Sessions))
+	}
+}
+
+// Sessions on the same repository but in different worktrees must be
+// distinguishable in the list: they share a Repository label, so the
+// worktree folder name is the only thing telling them apart.
+func TestSessionsWorktreeDistinguishesSameRepo(t *testing.T) {
+	now := time.Now()
+	all := []sessions.Session{
+		{ID: "a", Repository: "git@github.com:org/repo.git", CWD: "/home/u/repo.worktrees/feature-a", TmuxName: "feature-a", TmuxTarget: "a:0.0", State: sessions.StateWorking, UpdatedAt: now},
+		{ID: "b", Repository: "git@github.com:org/repo.git", CWD: "/home/u/repo.worktrees/feature-b", TmuxName: "feature-b", TmuxTarget: "b:0.0", State: sessions.StateWorking, UpdatedAt: now},
+	}
+
+	srv := NewServer(func() ([]sessions.Session, error) { return all, nil })
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/sessions", nil))
+
+	var resp SessionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
+	}
+	if len(resp.Sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(resp.Sessions))
+	}
+	if resp.Sessions[0].Repository != resp.Sessions[1].Repository {
+		t.Fatalf("expected a shared repository label, got %q and %q", resp.Sessions[0].Repository, resp.Sessions[1].Repository)
+	}
+
+	got := map[string]bool{resp.Sessions[0].Worktree: true, resp.Sessions[1].Worktree: true}
+	if !got["feature-a"] || !got["feature-b"] {
+		t.Errorf("worktree names = %v, want feature-a and feature-b", got)
 	}
 }

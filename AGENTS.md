@@ -187,6 +187,29 @@ as an overlay over the terminal; selecting a session closes the overlay without
 resizing the terminal pane. The sidebar's right-edge pointer handle updates a
 bounded CSS width and persists it in browser local storage.
 
+**Row layout:** each row reads `glyph source location worktree repository
+age`. The **worktree** folder (`SessionView.Worktree`, i.e.
+`render.WorktreeName`) leads and never shrinks, because sessions on several
+worktrees of one repository are otherwise indistinguishable; the repository
+label trails it, dimmed, and absorbs all truncation. As in `--short`
+rendering, the repository token is omitted when it is identical to the
+worktree name. A custom session name replaces the worktree in the row
+(rendered in italics); the folder itself stays visible in the row tooltip and
+in the `Worktree` row of the session-info panel.
+
+**Picker shortcuts** (sidebar focus only, so an attached terminal still
+receives these keys):
+
+| Key | Action |
+|---|---|
+| `ctrl-n` | Rename the session under the cursor (`POST /api/sessions/{id}/name`) |
+| `ctrl-a` | Alias the repository under the cursor (`POST /api/repos/alias`) |
+| `F2` | Same as `ctrl-n` |
+
+Double-clicking a row renames it; right-clicking the repository token sets an
+alias. Any edit to `internal/webui/static/*` must bump `CACHE_NAME` in
+`sw.js`, or the service worker keeps serving the previous app shell.
+
 **Attach model:** local sessions attach through a **grouped tmux session**
 (`tmux new-session -t <original>`, name `tsession-web-<sha256(origin+id)[:12]>`)
 so the browser gets independent sizing without resizing or stealing any split

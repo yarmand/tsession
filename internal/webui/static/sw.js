@@ -9,7 +9,7 @@
 // the server is briefly unreachable. Every other
 // request (notably /api/* and the /api/terminal WebSocket upgrade) passes
 // straight through to the network, untouched and uncached.
-const CACHE_NAME = "tsession-shell-v7";
+const CACHE_NAME = "tsession-shell-v9";
 const SHELL_PATHS = [
   "/",
   "/app.css",

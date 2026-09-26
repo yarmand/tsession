@@ -14,16 +14,23 @@ import (
 // (empty for local sessions) and resolved remote r: a direct local dial for
 // local sessions, DevcontainerDialer for devcontainer remotes (which have no
 // port-forwarding primitive), and RemoteTunnelDialer for everything else
-// (ssh, codespace).
-func PortReadyFor(origin string, r config.Remote) PortReadyFunc {
+// (ssh, codespace). logCmd, if non-nil, is called with the exact bin/args of
+// any SSH (or equivalent) command run to reach the remote, so callers can
+// surface it in a debug log; it may be nil.
+func PortReadyFor(origin string, r config.Remote, logCmd CommandLogFunc) PortReadyFunc {
 	if origin == "" {
 		return LocalDialer
 	}
 	if r.Type == "devcontainer" {
 		return DevcontainerDialer(r)
 	}
-	return RemoteTunnelDialer(r)
+	return RemoteTunnelDialer(r, logCmd)
 }
+
+// CommandLogFunc is called with the exact bin/args of a command about to be
+// run to reach a remote host (e.g. an ssh -L port-forward), so a caller can
+// log it for diagnostics before it runs.
+type CommandLogFunc func(bin string, args []string)
 
 // LocalDialer is a PortReadyFunc for a codeserver instance running on this
 // host: it dials the discovered loopback port directly, with no extra
@@ -40,12 +47,13 @@ func LocalDialer(port int) (dial func() (net.Conn, error), teardown func() error
 // remote port, it establishes a dedicated, persistent port-forwarding
 // process (see codecmd.TunnelCommand) from a freshly allocated local port to
 // that remote port, waits for the forward to come up, and dials through it.
-// The returned teardown kills the forwarding process.
+// The returned teardown kills the forwarding process. logCmd, if non-nil, is
+// called with the tunnel command's bin/args just before it runs.
 //
 // Devcontainer remotes have no port-forwarding equivalent to ssh -L (docker
 // exec cannot forward ports); RemoteTunnelDialer returns an error if called
 // for one. See internal/codeserver's devcontainer-specific dialer instead.
-func RemoteTunnelDialer(r config.Remote) PortReadyFunc {
+func RemoteTunnelDialer(r config.Remote, logCmd CommandLogFunc) PortReadyFunc {
 	return func(remotePort int) (dial func() (net.Conn, error), teardown func() error, err error) {
 		localPort, err := freeLoopbackPort()
 		if err != nil {
@@ -58,6 +66,9 @@ func RemoteTunnelDialer(r config.Remote) PortReadyFunc {
 		}
 		if !ok {
 			return nil, nil, fmt.Errorf("codeserver: remote type %q has no port-forwarding tunnel", r.Type)
+		}
+		if logCmd != nil {
+			logCmd(bin, args)
 		}
 
 		cmd := exec.Command(bin, args...)

@@ -224,3 +224,45 @@ func TestStaticAssets_CodeViewAltEBehaviourPresent(t *testing.T) {
 		t.Fatal("session list hint does not mention Alt+E")
 	}
 }
+
+func TestStaticAssets_UserInteractionsReportDebugEvents(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{
+		"function reportUserInteraction",
+		`"/api/debug"`,
+		`reportUserInteraction("select-session"`,
+		`reportUserInteraction("code-view-show"`,
+		`reportUserInteraction("code-view-hide"`,
+		`reportUserInteraction("code-view-close"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+}
+
+func TestStaticAssets_FailuresReportDebugEventsWithErrorLevel(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{
+		`function reportFailure`,
+		`"error"`,
+		`reportFailure("code-view-failed"`,
+		`reportFailure("code-view-start-failed"`,
+		`reportFailure("code-view-poll-failed"`,
+		`reportFailure("terminal-connect-failed"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+}

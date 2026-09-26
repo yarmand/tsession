@@ -9,6 +9,7 @@ package webui
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -68,6 +69,8 @@ type Server struct {
 	codeKeysMu     sync.Mutex
 	codeKeys       map[string]codeserver.Key
 	codeTransports map[string]*http.Transport
+
+	debugLogf func(format string, args ...any)
 }
 
 // Option configures optional Server dependencies not every caller needs
@@ -106,6 +109,7 @@ func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
 		codeDataDir:     defaultCodeDataDir(),
 		codeKeys:        make(map[string]codeserver.Key),
 		codeTransports:  make(map[string]*http.Transport),
+		debugLogf:       log.Printf,
 	}
 	s.sessionCache = newSessionCache(sessionsFn, s.now)
 	for _, opt := range opts {
@@ -132,6 +136,16 @@ func (s *Server) SetPollInterval(d time.Duration) { s.pollInterval = d }
 // every change; production callers can leave the 3s default.
 func (s *Server) SetSessionTTL(d time.Duration) { s.sessionCache.SetTTL(d) }
 
+// SetDebugLog overrides where browser user-interaction debug events are
+// written. Production callers use the default log.Printf.
+func (s *Server) SetDebugLog(fn func(format string, args ...any)) {
+	if fn == nil {
+		s.debugLogf = func(string, ...any) {}
+		return
+	}
+	s.debugLogf = fn
+}
+
 // Handler returns an http.Handler serving this Server's API routes, mounted
 // at their final paths (e.g. "/api/sessions"). Callers combine it with
 // static asset handlers as needed.
@@ -141,6 +155,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/name", s.handleRenameSession)
 	mux.HandleFunc("POST /api/repos/alias", s.handleRepoAlias)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	mux.HandleFunc("POST /api/debug", s.handleDebugEvent)
 	mux.HandleFunc("GET /api/terminal/{origin}/{id}", s.handleTerminal)
 	mux.HandleFunc("POST /api/codeserver/{origin}/{id}", s.handleCodeServerStart)
 	mux.HandleFunc("GET /api/codeserver/{origin}/{id}", s.handleCodeServerStatus)

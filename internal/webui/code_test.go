@@ -1,12 +1,15 @@
 package webui
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +53,21 @@ httpd.serve_forever()
 	return path
 }
 
+// fakeFailingCodeScript writes a shell script standing in for a `code`
+// binary that is present but broken: it exits immediately with a non-zero
+// status and never prints a "Web UI available at" line, so codeserver's
+// waitLoop marks the instance StatusFailed shortly after launch.
+func fakeFailingCodeScript(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fake-failing-code.sh")
+	script := "#!/bin/sh\necho 'boom: missing dependency' >&2\nexit 1\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func newTestCodeServer(t *testing.T, all []sessions.Session) (*Server, *codeserver.Registry) {
 	t.Helper()
 	registry := codeserver.NewRegistry()
@@ -62,6 +80,28 @@ func newTestCodeServer(t *testing.T, all []sessions.Session) (*Server, *codeserv
 	)
 	srv.SetCodeDataDir(t.TempDir())
 	return srv, registry
+}
+
+// newTestCodeServerWithBin is like newTestCodeServer but lets the caller
+// supply an arbitrary `code` binary path (e.g. one that fails to start),
+// and captures every debug log line the server emits.
+func newTestCodeServerWithBin(t *testing.T, all []sessions.Session, bin string) (*Server, *bytes.Buffer) {
+	t.Helper()
+	registry := codeserver.NewRegistry()
+	t.Cleanup(func() { _ = registry.Shutdown() })
+
+	cfg := &config.Config{CodeCommand: bin}
+	srv := NewServer(
+		func() ([]sessions.Session, error) { return all, nil },
+		WithCodeServer(registry, func() (*config.Config, error) { return cfg, nil }),
+	)
+	srv.SetCodeDataDir(t.TempDir())
+
+	var logs bytes.Buffer
+	srv.SetDebugLog(func(format string, args ...any) {
+		_, _ = fmt.Fprintf(&logs, format+"\n", args...)
+	})
+	return srv, &logs
 }
 
 func decodeCodeServerResponse(t *testing.T, rec *httptest.ResponseRecorder) codeServerResponse {
@@ -112,6 +152,109 @@ func TestHandleCodeServerStart_UnknownSessionReturns404(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// TestHandleCodeServerStart_LogsSSHCommandForRemoteSession covers the
+// "any ssh command sent to the remote" debug requirement: starting a code
+// view for a remote session must log the exact ssh command used to launch
+// it, before attempting to run it, so a misconfigured code_command or
+// unreachable host is diagnosable from the ssh command that was actually
+// invoked.
+func TestHandleCodeServerStart_LogsSSHCommandForRemoteSession(t *testing.T) {
+	all := []sessions.Session{{ID: "s1", Origin: "devbox", CWD: "/home/me/proj"}}
+	registry := codeserver.NewRegistry()
+	t.Cleanup(func() { _ = registry.Shutdown() })
+
+	// SSHCommand deliberately doesn't exist: the ssh command is logged
+	// before it's ever run, so registry.Start failing afterward doesn't
+	// prevent the log line from appearing.
+	remote := config.Remote{Name: "devbox", Type: "ssh", Host: "devbox.example.com", CodeCommand: "/usr/local/bin/vscode-cli", SSHCommand: "/does/not/exist"}
+	cfg := &config.Config{}
+	srv := NewServer(
+		func() ([]sessions.Session, error) { return all, nil },
+		WithCodeServer(registry, func() (*config.Config, error) { return cfg, nil }),
+		WithRemotes(func(origin string) (config.Remote, bool, error) {
+			if origin == "devbox" {
+				return remote, true, nil
+			}
+			return config.Remote{}, false, nil
+		}),
+	)
+	srv.SetCodeDataDir(t.TempDir())
+
+	var logs bytes.Buffer
+	srv.SetDebugLog(func(format string, args ...any) {
+		_, _ = fmt.Fprintf(&logs, format+"\n", args...)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/codeserver/devbox/s1", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	got := logs.String()
+	for _, want := range []string{
+		"action=code-view-ssh-command",
+		"session=s1",
+		"origin=devbox",
+		"/does/not/exist",
+		"devbox.example.com",
+		"/usr/local/bin/vscode-cli",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("debug log missing %q: %s", want, got)
+		}
+	}
+}
+
+// TestHandleCodeServerStart_LogsFailureWhenBinaryMissing covers the
+// synchronous failure path: the configured `code` binary doesn't exist at
+// all, so codeserver.Registry.Start fails immediately (before any instance
+// is created) and the handler must still surface a debug log line, since
+// this is exactly the "code is failing to start" case operators need to
+// diagnose.
+func TestHandleCodeServerStart_LogsFailureWhenBinaryMissing(t *testing.T) {
+	all := []sessions.Session{{ID: "s1", CWD: t.TempDir()}}
+	srv, logs := newTestCodeServerWithBin(t, all, filepath.Join(t.TempDir(), "no-such-code-binary"))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/codeserver/local/s1", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500, body=%s", rec.Code, rec.Body.String())
+	}
+	got := logs.String()
+	for _, want := range []string{"level=error", "action=code-view-start-failed", "session=s1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("debug log missing %q: %s", want, got)
+		}
+	}
+}
+
+// TestHandleCodeServerStatus_LogsFailureWhenInstanceExitsImmediately covers
+// the asynchronous failure path: the `code` binary exists and launches, but
+// exits immediately (e.g. a broken install), so the instance transitions
+// from starting to StatusFailed on its own. The first status poll to
+// observe that transition must log it.
+func TestHandleCodeServerStatus_LogsFailureWhenInstanceExitsImmediately(t *testing.T) {
+	all := []sessions.Session{{ID: "s1", CWD: t.TempDir()}}
+	srv, logs := newTestCodeServerWithBin(t, all, fakeFailingCodeScript(t))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/codeserver/local/s1", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("start status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	waitForCodeStatus(t, srv, "/api/codeserver/local/s1", string(codeserver.StatusFailed))
+
+	got := logs.String()
+	for _, want := range []string{"level=error", "action=code-view-instance-failed", "session=s1", "boom: missing dependency"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("debug log missing %q: %s", want, got)
+		}
 	}
 }
 

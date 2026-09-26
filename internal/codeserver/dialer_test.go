@@ -3,6 +3,7 @@ package codeserver
 import (
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,9 +102,35 @@ func TestWaitForListener_TimesOutWhenNothingListens(t *testing.T) {
 
 func TestRemoteTunnelDialer_DevcontainerUnsupported(t *testing.T) {
 	r := config.Remote{Name: "dc", Type: "devcontainer", Container: "myapp"}
-	_, _, err := RemoteTunnelDialer(r)(12345)
+	_, _, err := RemoteTunnelDialer(r, nil)(12345)
 	if err == nil {
 		t.Fatal("expected an error: devcontainer has no ssh -L equivalent")
+	}
+}
+
+func TestRemoteTunnelDialer_LogsCommandBeforeRunning(t *testing.T) {
+	r := config.Remote{Name: "box", Type: "ssh", SSHCommand: "/does/not/exist", Host: "box.example.com"}
+
+	var loggedBin string
+	var loggedArgs []string
+	_, _, err := RemoteTunnelDialer(r, func(bin string, args []string) {
+		loggedBin = bin
+		loggedArgs = args
+	})(59999)
+	if err == nil {
+		t.Fatal("expected an error: SSHCommand binary does not exist")
+	}
+	if loggedBin != "/does/not/exist" {
+		t.Fatalf("logCmd bin = %q, want /does/not/exist", loggedBin)
+	}
+	found := false
+	for _, a := range loggedArgs {
+		if strings.Contains(a, "box.example.com") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("logCmd args %q did not mention the remote host", loggedArgs)
 	}
 }
 
@@ -139,7 +166,7 @@ while True:
 	}
 
 	r := config.Remote{Name: "box", Type: "ssh", SSHCommand: fakeSSH, Host: "irrelevant"}
-	dial, teardown, err := RemoteTunnelDialer(r)(59999)
+	dial, teardown, err := RemoteTunnelDialer(r, nil)(59999)
 	if err != nil {
 		t.Fatalf("RemoteTunnelDialer: %v", err)
 	}

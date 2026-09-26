@@ -484,6 +484,7 @@
     socket.addEventListener("error", () => {
       if (pane.socket === socket) {
         updatePaneStatus(pane, "error");
+        reportFailure("terminal-connect-failed", s);
         if (pane.key === state.activeKey) {
           showBanner("Failed to connect to session.");
         }
@@ -523,7 +524,43 @@
     bannerEl.classList.remove("hidden");
   }
 
+  function reportUserInteraction(action, s, detail = "", level = "info") {
+    const payload = {
+      action,
+      sessionId: s && s.id ? s.id : "",
+      origin: s && s.origin ? s.origin : "",
+      sessionName: s ? displayName(s) : "",
+      detail,
+      level,
+    };
+    const body = JSON.stringify(payload);
+    try {
+      if (navigator.sendBeacon) {
+        const blob = new Blob([body], { type: "application/json" });
+        if (navigator.sendBeacon("/api/debug", blob)) return;
+      }
+      fetch("/api/debug", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    } catch (e) {
+      // Debug logging must never block the UI.
+    }
+  }
+
+  // reportFailure is reportUserInteraction's "error" counterpart: any
+  // failure the client observes on its own (a code view failing to start,
+  // a poll erroring out, a terminal socket dying, ...) is reported the same
+  // way, so `grep level=error` in the serve log finds it regardless of
+  // whether the server or the browser detected it first.
+  function reportFailure(action, s, detail = "") {
+    reportUserInteraction(action, s, detail, "error");
+  }
+
   function selectSession(s) {
+    reportUserInteraction("select-session", s);
     if (state.sidebarCollapsed) {
       state.sidebarOverlay = false;
       updateSidebarState();
@@ -594,6 +631,7 @@
       } catch (e) {
         cv.status = "failed";
         cv.error = String(e);
+        reportFailure("code-view-poll-failed", cv.s, cv.error);
         renderCodePane();
       }
       if (cv.status === "starting") pollCodeStatus(cv);
@@ -601,10 +639,14 @@
   }
 
   function applyCodeStatus(cv, data) {
+    const wasFailed = cv.status === "failed";
     cv.status = data.status || "stopped";
     cv.error = data.error || "";
     cv.log = data.log || "";
     if (data.path) cv.path = data.path;
+    if (cv.status === "failed" && !wasFailed) {
+      reportFailure("code-view-failed", cv.s, cv.error);
+    }
     if (cv.status === "running" && cv.path) ensureCodeIframe(cv);
     renderCodePane();
   }
@@ -684,11 +726,13 @@
     const cv = getOrCreateCodeView(s);
     if (cv.visible) {
       cv.visible = false;
+      reportUserInteraction("code-view-hide", s);
       renderCodePane();
       return;
     }
 
     cv.visible = true;
+    reportUserInteraction("code-view-show", s);
     if (cv.status === "running" || cv.status === "starting") {
       renderCodePane();
       if (cv.status === "starting" && !cv.pollTimer) pollCodeStatus(cv);
@@ -707,6 +751,7 @@
     } catch (e) {
       cv.status = "failed";
       cv.error = String(e && e.message ? e.message : e);
+      reportFailure("code-view-start-failed", s, cv.error);
       renderCodePane();
     }
   }
@@ -719,6 +764,7 @@
     stopPolling(cv);
     cv.visible = false;
     cv.status = "stopped";
+    reportUserInteraction("code-view-close", s);
     if (cv.iframe) {
       cv.iframe.remove();
       cv.iframe = null;
@@ -747,6 +793,7 @@
     if (pane && state.selectedSession) pane.term.focus();
     updateSidebarState();
     updateFocusIndicator();
+    reportUserInteraction("focus-terminal", state.selectedSession);
   }
 
   function focusList() {
@@ -758,6 +805,7 @@
     updateSidebarState();
     updateFocusIndicator();
     renderSessions();
+    reportUserInteraction("focus-list", state.selectedSession);
   }
 
   function updateSidebarState() {
@@ -774,6 +822,7 @@
   function toggleSidebar() {
     state.sidebarCollapsed = !state.sidebarCollapsed;
     state.sidebarOverlay = false;
+    reportUserInteraction(state.sidebarCollapsed ? "sidebar-hide" : "sidebar-show", state.selectedSession);
     if (state.sidebarCollapsed && state.selectedSession) {
       focusTerminal();
       return;
@@ -1011,6 +1060,7 @@
     if (sessionsResize.hasPointerCapture(ev.pointerId)) {
       sessionsResize.releasePointerCapture(ev.pointerId);
     }
+    reportUserInteraction("sidebar-resize", state.selectedSession, appEl.style.getPropertyValue("--sidebar-width"));
   }
   sessionsResize.addEventListener("pointerup", stopSidebarResize);
   sessionsResize.addEventListener("pointercancel", stopSidebarResize);
@@ -1033,6 +1083,7 @@
     if (codeResize.hasPointerCapture(ev.pointerId)) {
       codeResize.releasePointerCapture(ev.pointerId);
     }
+    reportUserInteraction("code-view-resize", state.selectedSession, codePane.style.getPropertyValue("--code-width"));
   }
   codeResize.addEventListener("pointerup", stopCodeResize);
   codeResize.addEventListener("pointercancel", stopCodeResize);

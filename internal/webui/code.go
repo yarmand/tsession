@@ -15,6 +15,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/yarma/tsession/internal/codecmd"
 	"github.com/yarma/tsession/internal/codeserver"
@@ -110,12 +111,16 @@ func (s *Server) handleCodeServerStart(w http.ResponseWriter, r *http.Request) {
 
 	origin, target, remote, err, status := s.resolveCodeTarget(originParam, id)
 	if err != nil {
+		if status != http.StatusNotFound {
+			s.logInteraction("code-view-resolve-failed", id, originParam, "", err.Error(), "error")
+		}
 		http.Error(w, err.Error(), status)
 		return
 	}
 
 	cfg, err := s.codeConfig()
 	if err != nil {
+		s.logInteraction("code-view-config-failed", id, origin, target.Name, err.Error(), "error")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -126,17 +131,24 @@ func (s *Server) handleCodeServerStart(w http.ResponseWriter, r *http.Request) {
 
 	bin, args, err := codecmd.Build(*target, remote, cfg, basePath, dataDir)
 	if err != nil {
+		s.logInteraction("code-view-build-failed", id, origin, target.Name, err.Error(), "error")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if origin != "" {
+		s.logInteraction("code-view-ssh-command", id, origin, target.Name, formatCommand(bin, args), "info")
 	}
 
 	regKey := codeserver.Key{Origin: origin, ID: id}
 	inst, err := s.codeRegistry.Start(regKey, codeserver.Spec{
-		Bin:       bin,
-		Args:      args,
-		PortReady: codeserver.PortReadyFor(origin, remote),
+		Bin:  bin,
+		Args: args,
+		PortReady: codeserver.PortReadyFor(origin, remote, func(tunnelBin string, tunnelArgs []string) {
+			s.logInteraction("code-view-tunnel-ssh-command", id, origin, target.Name, formatCommand(tunnelBin, tunnelArgs), "info")
+		}),
 	})
 	if err != nil {
+		s.logInteraction("code-view-start-failed", id, origin, target.Name, err.Error(), "error")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -144,7 +156,7 @@ func (s *Server) handleCodeServerStart(w http.ResponseWriter, r *http.Request) {
 	s.registerCodeKey(key, regKey)
 
 	status_, _, logTail, instErr := inst.Status()
-	writeCodeServerResponse(w, key, basePath+"/", status_, logTail, instErr)
+	s.writeCodeServerResponse(w, id, origin, key, basePath+"/", status_, logTail, instErr)
 }
 
 // handleCodeServerStatus serves GET /api/codeserver/{origin}/{id}: it
@@ -170,13 +182,13 @@ func (s *Server) handleCodeServerStatus(w http.ResponseWriter, r *http.Request) 
 	regKey := codeserver.Key{Origin: origin, ID: id}
 	inst, ok := s.codeRegistry.Get(regKey)
 	if !ok {
-		writeCodeServerResponse(w, key, "", codeserver.StatusStopped, nil, nil)
+		s.writeCodeServerResponse(w, id, origin, key, "", codeserver.StatusStopped, nil, nil)
 		return
 	}
 
 	s.registerCodeKey(key, regKey)
 	status_, _, logTail, instErr := inst.Status()
-	writeCodeServerResponse(w, key, "/api/code/"+key+"/", status_, logTail, instErr)
+	s.writeCodeServerResponse(w, id, origin, key, "/api/code/"+key+"/", status_, logTail, instErr)
 }
 
 // handleCodeServerStop serves DELETE /api/codeserver/{origin}/{id}: the
@@ -197,6 +209,7 @@ func (s *Server) handleCodeServerStop(w http.ResponseWriter, r *http.Request) {
 
 	regKey := codeserver.Key{Origin: origin, ID: id}
 	if err := s.codeRegistry.Stop(regKey); err != nil {
+		s.logInteraction("code-view-stop-failed", id, origin, "", err.Error(), "error")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -204,13 +217,25 @@ func (s *Server) handleCodeServerStop(w http.ResponseWriter, r *http.Request) {
 	key := codecmd.Key(origin, id)
 	s.unregisterCodeKey(key)
 
-	writeCodeServerResponse(w, key, "", codeserver.StatusStopped, nil, nil)
+	s.writeCodeServerResponse(w, id, origin, key, "", codeserver.StatusStopped, nil, nil)
 }
 
-func writeCodeServerResponse(w http.ResponseWriter, key, path string, status codeserver.Status, logTail []byte, instErr error) {
+// writeCodeServerResponse writes the JSON response shared by the start,
+// status, and stop endpoints. When instErr is non-nil (the instance
+// transitioned to StatusFailed — e.g. code serve-web exited immediately or
+// timed out waiting for its port) it also logs the failure, since this is
+// the single place every "code is failing to start" observation — whether
+// discovered synchronously on start or later while the browser polls
+// status — flows through.
+func (s *Server) writeCodeServerResponse(w http.ResponseWriter, sessionID, origin, key, path string, status codeserver.Status, logTail []byte, instErr error) {
 	resp := codeServerResponse{Key: key, Path: path, Status: string(status), Log: string(logTail)}
 	if instErr != nil {
 		resp.Error = instErr.Error()
+		detail := instErr.Error()
+		if tail := strings.TrimSpace(string(logTail)); tail != "" {
+			detail += " | log: " + tail
+		}
+		s.logInteraction("code-view-instance-failed", sessionID, origin, "", detail, "error")
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(resp)

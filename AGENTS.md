@@ -310,3 +310,27 @@ per-remote `code_command` override in `~/.config/tsession/config.yaml`
 `exec.LookPath`, remotely via `shellutil.CodeResolverCommand()` sourcing the
 remote's own interactive login shell).
 
+**Debug logging:** `POST /api/debug` (`internal/webui/debug.go`) lets the
+browser report user interactions (session selection, focus changes,
+sidebar/code-pane resize, code-view show/hide/close) and its own detected
+failures through `Server.logInteraction`, which writes one line per event to
+the `serve` process log (`serve user interaction: action=... session=...
+origin=... level=... name="..." detail="..."`, default `level=info` via
+`log.Printf`, overridable with `SetDebugLog` in tests). The server also logs
+failures it detects independently of the browser — every error branch in
+`handleCodeServerStart/Status/Stop`, plus `writeCodeServerResponse` logging
+`code-view-instance-failed` (with the instance's captured log tail) whenever
+it observes `codeserver.StatusFailed`, sync or async. Every ssh (or
+equivalent) command actually sent to a remote is also logged before it
+runs, regardless of whether it later succeeds: `code-view-ssh-command` (the
+launch command built by `codecmd.Build`, logged in `handleCodeServerStart`),
+`code-view-tunnel-ssh-command` (the `ssh -L`/`gh codespace ports forward`
+tunnel built by `codecmd.TunnelCommand`, logged via the `CommandLogFunc`
+threaded through `codeserver.PortReadyFor`/`RemoteTunnelDialer`), and
+`terminal-ssh-command` (the attach command built by `attachcmd.Build`,
+logged in `handleTerminal`) — each with the full shell-quoted command line
+as `detail`, so a misconfigured `code_command` or unreachable host is
+diagnosable from the exact command that was invoked. `grep level=error`
+finds every failure from either side; `grep ssh-command` finds every ssh
+invocation.
+

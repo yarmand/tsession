@@ -309,6 +309,11 @@ remotes:
     host: user@lab.example.com
     ssh_command: ssh -J bastion
 
+  # Custom VS Code binary for this remote's Alt+E code view (see above)
+  - name: box
+    host: box.example.com
+    code_command: /home/me/.local/bin/code
+
   # GitHub Codespace
   - name: codespace
     type: codespace
@@ -325,9 +330,10 @@ remotes:
     host: offline.example.com
     active: false
 
-# Optional: override the `code` binary used by Alt+E's code view (see
-# above). Unset resolves "code" from PATH — locally via the shell, remotely
-# via the remote's own interactive login shell.
+# Optional: default `code` binary used by Alt+E's code view for any remote
+# that doesn't set its own code_command (see above). Unset resolves "code"
+# from PATH — locally via the shell, remotely via the remote's own
+# interactive login shell.
 code_command: /usr/local/bin/code
 ```
 
@@ -342,6 +348,14 @@ code_command: /usr/local/bin/code
 | `container` | Devcontainer | — | Docker container name |
 | `user` | No | — | User passed to `docker exec` |
 | `code_command` | No | top-level `code_command`, or `code` from PATH | Per-remote override of the `code` binary for this remote's code view |
+
+The `code` binary used for a given remote's Alt+E code view resolves in this
+order: that remote's own `code_command` → the top-level `code_command:` →
+`code` resolved from PATH (locally via the shell, remotely via the remote's
+own interactive login shell). Set the remote's `code_command` when only one
+host needs a non-default path; set the top-level one to change the default
+for every remote at once.
+
 ### Remote discovery
 
 For each enabled remote, `tsession`:

@@ -185,3 +185,27 @@ A disconnected browser tab never stops VS Code.
 - `internal/webui/static/{index.html,app.css,app.js}` — code-pane layout and
   Alt+E behaviour.
 - `cmd/serve.go`, `gui/app.go` — wiring and shutdown.
+
+## Debug logging for user interactions and failures
+
+Every meaningful user interaction, and every failure regardless of which
+side detects it, is logged in the `serve` process log:
+
+- `POST /api/debug` (`internal/webui/debug.go`) accepts `{action, sessionId,
+  origin, sessionName, detail, level}` from the browser and logs it via
+  `Server.logInteraction` as `serve user interaction: action=... session=...
+  origin=... level=... name="..." detail="..."`. `level` defaults to
+  `"info"`; the frontend's `reportFailure` helper sets `"error"`.
+- The frontend (`app.js`) calls `reportUserInteraction` on session selection,
+  focus changes, sidebar/code-pane show/hide/resize, and code-view
+  show/hide/close, and calls `reportFailure` when it observes a code view
+  failing to start or poll, or a terminal WebSocket erroring out.
+- The server also logs failures it detects on its own, independent of the
+  browser: every error branch in `handleCodeServerStart/Status/Stop`, and —
+  critically for "code is failing to start" — `writeCodeServerResponse`
+  logs `code-view-instance-failed` (with the captured log tail, not just the
+  exit error) whenever an instance has transitioned to `codeserver.
+  StatusFailed`, whether that's discovered synchronously on start or later
+  while the browser polls status.
+- `grep 'level=error'` in the `serve` log finds every failure from either
+  side without needing to correlate browser and server logs separately.

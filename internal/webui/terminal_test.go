@@ -1,8 +1,10 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
@@ -215,5 +217,54 @@ func TestHandleTerminal_RemoteResolverErrorReturns400(t *testing.T) {
 	}
 	if resp == nil || resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got resp=%+v", resp)
+	}
+}
+
+// TestHandleTerminal_LogsSSHCommandForRemoteSession covers the "any ssh
+// command sent to the remote" debug requirement for terminal attach (as
+// distinct from the code view's own ssh command, see code_test.go): the ssh
+// command built to attach to a remote session's tmux must be logged before
+// it is run, regardless of whether the attach itself later succeeds.
+func TestHandleTerminal_LogsSSHCommandForRemoteSession(t *testing.T) {
+	registry := webterm.NewRegistry()
+	t.Cleanup(func() { _ = registry.Shutdown() })
+
+	all := []sessions.Session{{ID: "s1", Origin: "devbox", TmuxName: "mysession"}}
+	remote := config.Remote{Name: "devbox", Type: "ssh", Host: "devbox.example.com", SSHCommand: "/does/not/exist"}
+	srv := NewServer(
+		func() ([]sessions.Session, error) { return all, nil },
+		WithTerminal(registry),
+		WithRemotes(func(origin string) (config.Remote, bool, error) {
+			if origin == "devbox" {
+				return remote, true, nil
+			}
+			return config.Remote{}, false, nil
+		}),
+	)
+
+	var logs bytes.Buffer
+	srv.SetDebugLog(func(format string, args ...any) {
+		_, _ = fmt.Fprintf(&logs, format+"\n", args...)
+	})
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/terminal/devbox/s1"
+	// The attach itself is expected to fail (SSHCommand doesn't exist);
+	// only the debug log line is under test here.
+	_, _, _ = websocket.Dial(context.Background(), url, nil)
+
+	got := logs.String()
+	for _, want := range []string{
+		"action=terminal-ssh-command",
+		"session=s1",
+		"origin=devbox",
+		"/does/not/exist",
+		"devbox.example.com",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("debug log missing %q: %s", want, got)
+		}
 	}
 }

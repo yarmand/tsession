@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/creack/pty"
@@ -166,6 +167,22 @@ func (r *Registry) Shutdown() error {
 	return errors.Join(errs...)
 }
 
+// terminalEnv returns the environment for the PTY child. The browser side is
+// an xterm.js emulator, so TERM is pinned to xterm-256color: tmux only emits
+// OSC 52 clipboard escapes for xterm-compatible terminals, and a GUI launched
+// from Finder inherits no TERM at all.
+func terminalEnv() []string {
+	env := os.Environ()
+	out := env[:0:len(env)]
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "TERM=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "TERM=xterm-256color")
+}
+
 func newTerminal(key Key, spec Spec) (*Terminal, error) {
 	rows, cols := spec.Rows, spec.Cols
 	if rows == 0 {
@@ -176,6 +193,7 @@ func newTerminal(key Key, spec Spec) (*Terminal, error) {
 	}
 
 	cmd := exec.Command(spec.Bin, spec.Args...)
+	cmd.Env = terminalEnv()
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
 		return nil, fmt.Errorf("webterm: start %s: %w", spec.Bin, err)

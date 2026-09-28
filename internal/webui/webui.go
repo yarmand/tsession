@@ -9,11 +9,14 @@ package webui
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
+	"github.com/yarma/tsession/internal/codeserver"
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/render"
 	"github.com/yarma/tsession/internal/sessions"
@@ -58,6 +61,17 @@ type Server struct {
 
 	notifyStorePath string
 	pollInterval    time.Duration
+
+	codeRegistry *codeserver.Registry
+	codeCfgFn    CodeConfigProvider
+	codeDataDir  string
+
+	codeKeysMu     sync.Mutex
+	codeKeys       map[string]codeserver.Key
+	codeTransports map[string]*http.Transport
+
+	debugLogf    func(format string, args ...any)
+	openExternal func(string) error
 }
 
 // Option configures optional Server dependencies not every caller needs
@@ -85,6 +99,12 @@ func WithTerminal(registry *webterm.Registry) Option {
 	return func(s *Server) { s.registry = registry }
 }
 
+// WithExternalOpener lets the code view send blocked external links to the
+// host's default browser. Without it, /api/open-external is unavailable.
+func WithExternalOpener(open func(string) error) Option {
+	return func(s *Server) { s.openExternal = open }
+}
+
 // NewServer builds a Server from a SessionsProvider and optional Options.
 func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
 	s := &Server{
@@ -93,6 +113,10 @@ func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
 		now:             time.Now,
 		notifyStorePath: defaultNotifyStorePath(),
 		pollInterval:    3 * time.Second,
+		codeDataDir:     defaultCodeDataDir(),
+		codeKeys:        make(map[string]codeserver.Key),
+		codeTransports:  make(map[string]*http.Transport),
+		debugLogf:       log.Printf,
 	}
 	s.sessionCache = newSessionCache(sessionsFn, s.now)
 	for _, opt := range opts {
@@ -119,6 +143,16 @@ func (s *Server) SetPollInterval(d time.Duration) { s.pollInterval = d }
 // every change; production callers can leave the 3s default.
 func (s *Server) SetSessionTTL(d time.Duration) { s.sessionCache.SetTTL(d) }
 
+// SetDebugLog overrides where browser user-interaction debug events are
+// written. Production callers use the default log.Printf.
+func (s *Server) SetDebugLog(fn func(format string, args ...any)) {
+	if fn == nil {
+		s.debugLogf = func(string, ...any) {}
+		return
+	}
+	s.debugLogf = fn
+}
+
 // Handler returns an http.Handler serving this Server's API routes, mounted
 // at their final paths (e.g. "/api/sessions"). Callers combine it with
 // static asset handlers as needed.
@@ -128,7 +162,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/name", s.handleRenameSession)
 	mux.HandleFunc("POST /api/repos/alias", s.handleRepoAlias)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	mux.HandleFunc("POST /api/debug", s.handleDebugEvent)
+	mux.HandleFunc("POST /api/open-external", s.handleOpenExternal)
 	mux.HandleFunc("GET /api/terminal/{origin}/{id}", s.handleTerminal)
+	mux.HandleFunc("POST /api/codeserver/{origin}/{id}", s.handleCodeServerStart)
+	mux.HandleFunc("GET /api/codeserver/{origin}/{id}", s.handleCodeServerStatus)
+	mux.HandleFunc("DELETE /api/codeserver/{origin}/{id}", s.handleCodeServerStop)
+	mux.HandleFunc("/api/code/{key}/", s.handleCodeProxy)
 	mux.Handle("/", staticHandler())
 	return mux
 }

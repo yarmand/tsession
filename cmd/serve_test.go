@@ -102,7 +102,7 @@ func TestBuildEmbeddedServerReturnsWorkingHandlerAndRegistry(t *testing.T) {
 		return nil
 	}
 
-	srv, registry, err := BuildEmbeddedServer(14 * 24 * time.Hour)
+	srv, registry, codeRegistry, err := BuildEmbeddedServer(14 * 24 * time.Hour)
 	if err != nil {
 		t.Fatalf("BuildEmbeddedServer: %v", err)
 	}
@@ -112,7 +112,11 @@ func TestBuildEmbeddedServerReturnsWorkingHandlerAndRegistry(t *testing.T) {
 	if registry == nil {
 		t.Fatal("expected non-nil *webterm.Registry")
 	}
+	if codeRegistry == nil {
+		t.Fatal("expected non-nil *codeserver.Registry")
+	}
 	defer registry.Shutdown()
+	defer codeRegistry.Shutdown()
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

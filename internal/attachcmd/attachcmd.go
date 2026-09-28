@@ -65,25 +65,13 @@ func BuildKill(s sessions.Session, r config.Remote) (bin string, args []string, 
 }
 
 // wrapInTransport wraps script for execution: run directly for a local
-// session, or through r's interactive transport for a remote one. See
-// Build's doc comment for the ssh/codespace-vs-devcontainer quoting
-// distinction this preserves.
+// session, or through r's interactive transport for a remote one (see
+// shellutil.WrapRemoteTransport).
 func wrapInTransport(s sessions.Session, r config.Remote, script string) (string, []string, error) {
 	if s.Origin == "" {
 		return "sh", []string{"-c", script}, nil
 	}
-
-	switch r.Type {
-	case "", "ssh", "codespace":
-		bin, args := r.ResumeCommand()
-		command := shellutil.InteractiveLoginCommand(script)
-		return bin, append(args, "sh -c "+shellutil.Quote(command)), nil
-	case "devcontainer":
-		bin, args := r.ResumeCommand()
-		return bin, append(args, "sh", "-c", shellutil.InteractiveLoginCommand(script)), nil
-	default:
-		return "", nil, fmt.Errorf("attachcmd: unsupported remote type %q", r.Type)
-	}
+	return shellutil.WrapRemoteTransport(r, script)
 }
 
 // buildScript builds the tmux script (or, when no tmux is reachable at all,

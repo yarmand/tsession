@@ -111,6 +111,46 @@ func TestLoadRemotes(t *testing.T) {
 	}
 }
 
+func TestLoadRemotes_CodeCommand(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	err := os.WriteFile(cfgPath, []byte(`code_command: /usr/local/bin/code
+remotes:
+  - name: devbox
+    host: devbox.local
+    code_command: /home/me/.local/bin/code
+  - name: standby
+    host: standby.local
+`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CodeCommand != "/usr/local/bin/code" {
+		t.Fatalf("cfg.CodeCommand = %q, want /usr/local/bin/code", cfg.CodeCommand)
+	}
+	if got := cfg.Remotes[0].CodeBinary(cfg); got != "/home/me/.local/bin/code" {
+		t.Errorf("remote[0].CodeBinary() = %q, want per-remote override", got)
+	}
+	if got := cfg.Remotes[1].CodeBinary(cfg); got != "/usr/local/bin/code" {
+		t.Errorf("remote[1].CodeBinary() = %q, want top-level default", got)
+	}
+}
+
+func TestRemoteCodeBinary_EmptyWhenUnset(t *testing.T) {
+	r := Remote{Name: "bare"}
+	if got := r.CodeBinary(&Config{}); got != "" {
+		t.Errorf("CodeBinary() = %q, want empty (resolve from PATH)", got)
+	}
+	if got := r.CodeBinary(nil); got != "" {
+		t.Errorf("CodeBinary(nil) = %q, want empty", got)
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	cfg, err := LoadFrom("/nonexistent/path/config.yaml")
 	if err != nil {

@@ -85,18 +85,47 @@ Useful controls:
 
 | Control | Action |
 |---|---|
-| `Alt+/` | Toggle focus between the session list and terminal |
+| `Alt+/` | Toggle focus between the session list and terminal; from the code pane, move focus to the terminal |
 | `Alt+H` | Collapse or restore the session list |
+| `Alt+E` | Toggle a VS Code (`code serve-web`) pane for the highlighted session |
 | `↑` / `↓` | Move through the focused session list |
 | `Enter` | Open the highlighted session |
 | `F2` | Rename the selected session |
 | Top-left button | Collapse or restore the session list |
 | Drag the list edge | Resize the session list; the width is remembered |
+| Drag the code pane edge | Resize the code pane; the width is remembered |
 
 When the list is collapsed, `Alt+/` opens it as an overlay without resizing
 the terminal. Selecting a session closes the overlay automatically. Remote
 origins receive distinct colors so sessions from different hosts remain easy
 to identify.
+
+`Alt+E` (with the session list focused) opens a code editor pane docked to
+the right of the terminal, backed by a `code serve-web` instance scoped to
+that session's working directory. It is off by default, per session:
+switching sessions hides the pane without stopping VS Code, and switching
+back shows it again instantly, without relaunching. The ✕ button in the
+pane's header is the only thing that stops it. This works for local sessions
+and for SSH, Codespaces, and devcontainer remotes alike — remote sessions
+reach their `code serve-web` instance through the same server, tunnelling
+or relaying the connection as needed. See
+[docs/superpowers/specs/2026-09-18-code-view-design.md](docs/superpowers/specs/2026-09-18-code-view-design.md)
+for the full design.
+
+VS Code sign-in (for example Settings Sync) opens GitHub in your default
+browser. In the native GUI, external links and sign-in windows from the code
+pane open there instead of in an unsupported WebKit popup; in `tsession serve`
+a normal browser popup is attempted first, falling back to your default
+browser when it is blocked. The code pane also permits clipboard access for
+copying sign-in codes.
+
+Each code view keeps its VS Code state (extensions, settings) in
+`~/.tsession/codeserver/<key>` **on the host it runs on** — so a remote
+session's state lives under that remote's home directory, not yours.
+
+Text you copy inside the terminal — including from a remote session's tmux
+copy-mode — is placed on your local system clipboard, so you can paste it
+into any other app.
 
 ### 3. Add an SSH host
 
@@ -295,6 +324,11 @@ remotes:
     host: user@lab.example.com
     ssh_command: ssh -J bastion
 
+  # Custom VS Code binary for this remote's Alt+E code view (see above)
+  - name: box
+    host: box.example.com
+    code_command: /home/me/.local/bin/code
+
   # GitHub Codespace
   - name: codespace
     type: codespace
@@ -310,6 +344,12 @@ remotes:
   - name: offline
     host: offline.example.com
     active: false
+
+# Optional: default `code` binary used by Alt+E's code view for any remote
+# that doesn't set its own code_command (see above). Unset resolves "code"
+# from PATH — locally via the shell, remotely via the remote's own
+# interactive login shell.
+code_command: /usr/local/bin/code
 ```
 
 | Field | Required | Default | Description |
@@ -322,6 +362,15 @@ remotes:
 | `codespace` | Codespace | — | Codespace name |
 | `container` | Devcontainer | — | Docker container name |
 | `user` | No | — | User passed to `docker exec` |
+| `code_command` | No | top-level `code_command`, or `code` from PATH | Per-remote override of the `code` binary for this remote's code view |
+
+The `code` binary used for a given remote's Alt+E code view resolves in this
+order: that remote's own `code_command` → the top-level `code_command:` →
+`code` resolved from PATH (locally via the shell, remotely via the remote's
+own interactive login shell). Set the remote's `code_command` when only one
+host needs a non-default path; set the top-level one to change the default
+for every remote at once.
+
 ### Remote discovery
 
 For each enabled remote, `tsession`:

@@ -65,3 +65,18 @@ func TestCopilotResolverCommand_SetsCopilotBinOnSuccessPath(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeResolverCommand_SetsCodeBinOnSuccessPath(t *testing.T) {
+	cmd := CodeResolverCommand()
+	if cmd == "" {
+		t.Fatal("expected non-empty resolver command")
+	}
+	// The resolver must leave $code_bin set for callers to reference, and
+	// must fail loudly (exit 127) rather than silently continuing when
+	// resolution fails.
+	for _, want := range []string{"code_bin=", "command -v code", "exit 127"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("resolver command missing %q:\n%s", want, cmd)
+		}
+	}
+}

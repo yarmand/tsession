@@ -263,8 +263,18 @@ body.resizing-sidebar {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100vh;
+  background: #000;
+}
+
+#terminal-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   background: #000;
 }
 
@@ -330,6 +340,100 @@ body.resizing-sidebar {
   padding: 2px 8px;
   cursor: pointer;
 }
+
+#code-resize {
+  flex: 0 0 6px;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  background: var(--border);
+}
+
+#code-resize.hidden { display: none; }
+
+#code-resize:hover,
+body.resizing-code #code-resize {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+body.resizing-code {
+  cursor: col-resize;
+  user-select: none;
+}
+
+#code-pane {
+  --code-width: 40vw;
+  flex: 0 0 var(--code-width);
+  width: var(--code-width);
+  min-width: 240px;
+  max-width: 85vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border);
+}
+
+#code-pane.hidden { display: none; }
+
+#code-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+#code-pane-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+#code-pane-close {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg);
+  cursor: pointer;
+  line-height: 1;
+  padding: 1px 7px;
+}
+
+#code-pane-close:hover {
+  background: #333;
+}
+
+#code-pane-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+#code-pane-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  text-align: center;
+  padding: 16px;
+  white-space: pre-wrap;
+}
+
+.code-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.code-frame.hidden { display: none; }
 
 .hidden { display: none !important; }
 

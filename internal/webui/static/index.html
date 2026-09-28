@@ -18,6 +18,7 @@
 <button id="sessions-toggle" type="button" aria-label="Hide session list" title="Hide session list (Alt+H)">&#9776;</button>
 <div id="app">
   <aside id="sessions">
+    <div id="sessions-hint">Alt+/ focus &middot; Alt+H hide &middot; Alt+E code view &middot; &uarr;&darr; move &middot; &crarr; attach</div>
     <ul id="session-list"></ul>
     <div id="sessions-hint">
       <span class="hint-item">Alt+/ focus</span>
@@ -33,9 +34,22 @@
     <div id="sessions-resize" role="separator" aria-orientation="vertical" aria-label="Resize session list"></div>
   </aside>
   <main id="terminal-pane">
-    <div id="terminal-banner" class="hidden"></div>
-    <div id="terminal"></div>
-    <div id="empty-state">Select a session to attach.</div>
+    <div id="terminal-wrap">
+      <div id="terminal-banner" class="hidden"></div>
+      <div id="terminal"></div>
+      <div id="empty-state">Select a session to attach.</div>
+    </div>
+    <div id="code-resize" class="hidden" role="separator" aria-orientation="vertical" aria-label="Resize code view"></div>
+    <section id="code-pane" class="hidden">
+      <div id="code-pane-header">
+        <span id="code-pane-label"></span>
+        <span id="code-pane-status"></span>
+        <button id="code-pane-close" type="button" aria-label="Stop code view" title="Stop VS Code for this session">&times;</button>
+      </div>
+      <div id="code-pane-body">
+        <div id="code-pane-placeholder" class="hidden"></div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -53,6 +67,9 @@
 
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/addon-fit.js"></script>
+<script src="/external.js"></script>
+<script src="/clipboard.js"></script>
+<script src="/codekeys.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

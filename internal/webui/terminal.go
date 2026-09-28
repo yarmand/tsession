@@ -82,6 +82,9 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if origin != "" {
+			s.logInteraction("terminal-ssh-command", id, origin, target.Name, formatCommand(bin, args), "info")
+		}
 
 		sess := *target
 		rem := remote

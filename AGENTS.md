@@ -176,9 +176,12 @@ tmux-in-tmux nesting when resuming remote sessions. Full design:
 
 | Package | Responsibility |
 |---|---|
-| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`) or a `*webterm.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`) on `NewServer`. `sessioncache.go` holds the stale-while-revalidate cache in front of `SessionsProvider` (see below). |
+| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`) or a `*webterm.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`) on `NewServer`. |
+| `internal/webui` | HTTP surface only: `/`, `/api/sessions`, `/api/sessions/{id}/name`, `/api/repos/alias`, `/api/events` (SSE), `/api/terminal/{origin}/{id}` (WebSocket), `/api/codeserver/{origin}/{id}` (start/status/stop), `/api/code/{key}/...` (reverse proxy). No tmux/git/SSH I/O of its own — everything comes from injected provider functions (`SessionsProvider`, `AliasesProvider`, `RemoteResolver`, `CodeConfigProvider`) or a `*webterm.Registry`/`*codeserver.Registry`, wired via functional options (`WithAliases`, `WithRemotes`, `WithTerminal`, `WithCodeServer`) on `NewServer`. |
 | `internal/webterm` | Generic PTY registry keyed by `(origin, sessionID)`. Owns the `creack/pty` file, child process, a 256KB output ring buffer (replayed on reconnect), and fan-out to subscribed WebSocket clients. Knows nothing about tmux or SSH. |
-| `internal/attachcmd` | The only place that knows how to build the command `webterm` runs: grouped-tmux-attach scripts, remote-transport wrapping (via `config.Remote.ResumeCommand()`), and `BuildKill` for teardown (`tmux kill-session`). |
+| `internal/attachcmd` | The only place that knows how to build the command `webterm` runs: grouped-tmux-attach scripts, remote-transport wrapping (via `shellutil.WrapRemoteTransport`), and `BuildKill` for teardown (`tmux kill-session`). |
+| `internal/codecmd` | Pure command builder (no process I/O) for the code view: `Key(origin, id)` (opaque URL key), `Build(...)` (the `code serve-web` launch command, local or remote-transport-wrapped), and `TunnelCommand(...)` (ssh -L / `gh codespace ports forward` for reaching a remote instance's port). |
+| `internal/codeserver` | Registry of long-lived `code serve-web` child processes keyed by `(origin, sessionID)`, mirroring `internal/webterm`'s architecture: PTY-backed launch (so remote transports needing a tty work and stdout+stderr combine into one stream), ANSI-stripped port-scanning of the "Web UI available at" line, a bounded log ring, and per-transport dialing (`LocalDialer`, `RemoteTunnelDialer` for ssh/codespace, `DevcontainerDialer` for a per-connection `docker exec -i` stdio relay since `docker exec` has no port-forwarding primitive). `Registry.Start` is idempotent while an instance is starting/running — this is what makes reactivating a session with an existing code view reuse it instead of relaunching. |
 | `internal/webui/static` | `go:embed`ed frontend: `index.html`, `app.js`, `app.css`, plus vendored `xterm.js`/`xterm.css`/the fit addon under `vendor/` (MIT-licensed, no Node build step, no CDN dependency at runtime). |
 
 The web/GUI session list uses per-remote label colors. `Alt+H` (or the
@@ -186,6 +189,12 @@ top-left button) toggles the persistent sidebar. If collapsed, `Alt+/` opens it
 as an overlay over the terminal; selecting a session closes the overlay without
 resizing the terminal pane. The sidebar's right-edge pointer handle updates a
 bounded CSS width and persists it in browser local storage.
+
+`Alt+/` toggles focus list ↔ terminal. While focus is inside the VS Code code
+pane it always moves focus to the terminal. Keydowns inside that same-origin
+iframe never bubble to the parent document, so `static/codekeys.js` hooks the
+frame's own window (re-attached on every iframe `load`) in the **capture**
+phase and calls `focusTerminal()`, consuming the chord before VS Code sees it.
 
 **Row layout:** each row reads `glyph source location worktree repository
 age`. The **worktree** folder (`SessionView.Worktree`, i.e.
@@ -261,7 +270,136 @@ observe the same done/question transitions concurrently without racing over
 one lock file. The browser renders its own `Notification`, not an `osascript`
 call.
 
+**Clipboard (OSC 52):** copying inside the browser terminal — including from
+a *remote* session's tmux copy-mode — must reach the local system clipboard.
+tmux (with the default `set-clipboard external`) reports its own copies by
+emitting an OSC 52 escape to the attached client, but **xterm.js has no
+built-in OSC 52 handler** (the vendored bundle registers only `0,1,2,4,8,
+10,11,12,104,110,111,112`). `static/clipboard.js` adds one via
+`term.parser.registerOscHandler(52, ...)`:
+
+- `decode(payload)` parses `<targets>;<base64>`. A `?` payload is a *read
+  query* and is deliberately never answered, so a remote host can never read
+  the local clipboard. An empty payload is a no-op so the clipboard is not
+  wiped.
+- `systemWriter(navigator, document)` tries `navigator.clipboard.writeText`
+  first and falls back to a hidden `<textarea>` + `document.execCommand("copy")`.
+  The fallback is **required**, not defensive: the async Clipboard API needs
+  transient user activation, which an escape sequence arriving over a
+  WebSocket never has, so it rejects with `NotAllowedError`.
+- The handler always returns `true` so the sequence is consumed rather than
+  printed into the terminal.
+
+Failures report `terminal-clipboard-failed` through the `/api/debug` channel.
+
+tmux only emits OSC 52 for xterm-compatible `TERM` values (verified: works for
+`xterm`, `xterm-256color`, `tmux-256color`; silent for `screen-256color`, and
+nothing is emitted with an empty or `dumb` TERM). Because a GUI launched from
+Finder/Dock inherits no `TERM` at all, `webterm.terminalEnv()` strips any
+inherited `TERM` and pins `TERM=xterm-256color` on the PTY child — which is
+accurate anyway, since the far end is an xterm.js emulator.
+
 **Safety:** `--addr` must resolve to loopback (`127.0.0.1`/`127.0.0.0/8`,
 `::1`, or literal `localhost`); anything else is rejected before the listener
 binds. There is no auth, TLS, or non-loopback access in v1 — PTYs must never
 be reachable off-host.
+
+### Code view (`Alt+E`)
+
+An optional VS Code (`code serve-web`) pane, docked to the right of the
+terminal via a resizable divider, toggled with `Alt+E` while the session list
+is focused. Full design: `docs/superpowers/specs/2026-09-18-code-view-design.md`.
+
+It mirrors the terminal's own three-layer split — `internal/codecmd` (pure
+command building) → `internal/codeserver` (process registry) →
+`internal/webui`'s `/api/codeserver/*` and `/api/code/{key}/...` routes — so
+each layer is unit-testable without a live `code` binary or remote host.
+
+**Reaching the instance:** `code serve-web` is launched with
+`--server-base-path /api/code/<key>` (where `key = sha256(origin + id)[:6]`
+hex-encoded), so it emits URLs already prefixed with that path. `/api/code/{key}/...`
+is a same-origin `httputil.ReverseProxy` whose `Transport.DialContext` always
+calls the target `codeserver.Instance.Dial()` regardless of the requested
+address — this is what lets the same proxy code serve a direct loopback dial
+(local), an established ssh/codespace tunnel's local end (`RemoteTunnelDialer`),
+or a fresh per-connection `docker exec` stdio relay (`DevcontainerDialer`)
+uniformly. The request path is forwarded unmodified (no path rewriting), which
+is why `--server-base-path` must match `/api/code/<key>` exactly.
+
+**`--server-data-dir` is per host, not per tsession.** A local instance gets
+`~/.tsession/codeserver/<key>` from `webui`'s `codeDataDir`. A *remote*
+instance must not receive that path: the remote has its own filesystem and
+user, so a macOS-shaped path like `/Users/...` cannot be created on a Linux
+host. VS Code does not fall back — its extension host dies with
+`EACCES: permission denied, mkdir '/Users'`, and with no extension host
+nothing extension-backed works, including GitHub sign-in. `codecmd.Build`
+therefore ignores the caller's `dataDir` for remote sessions and substitutes
+`codecmd.RemoteDataDir(key)`, an **unquoted** `"$HOME/.tsession/codeserver/<key>"`
+expanded by the remote shell, with a `mkdir -p` ahead of the exec (VS Code
+will not create missing parents).
+
+**Per-session, not per-connection:** `state.codeViews` in `app.js` keeps one
+retained `<iframe>` per session key, created once and only ever shown/hidden
+— never destroyed or reloaded — so switching sessions preserves editor state
+and switching back is instant. Only the pane's ✕ button issues `DELETE
+/api/codeserver/{origin}/{id}`, which is the only thing that stops VS Code;
+switching sessions just hides the pane. `POST /api/codeserver/{origin}/{id}`
+(re)starts or reuses (never relaunches, per `codeserver.Registry.Start`'s
+idempotency) the session's instance; `GET` reports `starting`/`running`/
+`failed`/`stopped` plus a captured log tail, polled by the frontend while
+starting (VS Code's first run downloads the server build and can take
+minutes).
+
+**Sign-in popups:** `internal/webui/static/external.js` intercepts popup
+requests from the same-origin VS Code iframe. `gui/frontend/dist/index.html`
+marks the native GUI URL with `?gui=1`, since Wails' macOS WebKit does not
+create popup windows; native GUI links go to the default browser instead.
+
+VS Code never opens the sign-in URL directly. While the user gesture is still
+active it *reserves* a blank popup with an argument-less `window.open()`, and
+only assigns `location.href` once the auth extension has produced the URL. If
+the reservation yields no window, VS Code abandons the flow and Settings Sync
+sign-in times out. The bridge therefore always returns a stand-in window for a
+reservation, and hands the eventually assigned URL to the host browser. In an
+ordinary browser the real popup is still attempted first; `noopener` is
+stripped from the feature list (and re-applied to the result) so a `null`
+return reliably means "blocked" rather than "succeeded silently".
+
+`/api/open-external` only accepts same-origin JSON requests addressed to a
+loopback host and HTTPS (or loopback HTTP) URLs; debug logs omit URL query
+strings to avoid leaking OAuth tokens. The iframe allows clipboard access for
+sign-in codes.
+
+Changing any `static/` asset requires bumping `CACHE_NAME` in `static/sw.js`,
+or the service worker keeps serving the previous copy.
+
+**Config:** the `code` binary is resolved the same way as the terminal
+attach's `copilot`/`pi` resolution — top-level `code_command` or a
+per-remote `code_command` override in `~/.config/tsession/config.yaml`
+(`config.Remote.CodeBinary`), otherwise `code` from PATH (locally via
+`exec.LookPath`, remotely via `shellutil.CodeResolverCommand()` sourcing the
+remote's own interactive login shell).
+
+**Debug logging:** `POST /api/debug` (`internal/webui/debug.go`) lets the
+browser report user interactions (session selection, focus changes,
+sidebar/code-pane resize, code-view show/hide/close) and its own detected
+failures through `Server.logInteraction`, which writes one line per event to
+the `serve` process log (`serve user interaction: action=... session=...
+origin=... level=... name="..." detail="..."`, default `level=info` via
+`log.Printf`, overridable with `SetDebugLog` in tests). The server also logs
+failures it detects independently of the browser — every error branch in
+`handleCodeServerStart/Status/Stop`, plus `writeCodeServerResponse` logging
+`code-view-instance-failed` (with the instance's captured log tail) whenever
+it observes `codeserver.StatusFailed`, sync or async. Every ssh (or
+equivalent) command actually sent to a remote is also logged before it
+runs, regardless of whether it later succeeds: `code-view-ssh-command` (the
+launch command built by `codecmd.Build`, logged in `handleCodeServerStart`),
+`code-view-tunnel-ssh-command` (the `ssh -L`/`gh codespace ports forward`
+tunnel built by `codecmd.TunnelCommand`, logged via the `CommandLogFunc`
+threaded through `codeserver.PortReadyFor`/`RemoteTunnelDialer`), and
+`terminal-ssh-command` (the attach command built by `attachcmd.Build`,
+logged in `handleTerminal`) — each with the full shell-quoted command line
+as `detail`, so a misconfigured `code_command` or unreachable host is
+diagnosable from the exact command that was invoked. `grep level=error`
+finds every failure from either side; `grep ssh-command` finds every ssh
+invocation.

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/yarma/tsession/internal/codeserver"
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/reponames"
 	"github.com/yarma/tsession/internal/sessions"
@@ -43,7 +44,7 @@ func Serve(args []string) error {
 		return err
 	}
 
-	srv, registry, err := BuildEmbeddedServer(*maxAge)
+	srv, registry, codeRegistry, err := BuildEmbeddedServer(*maxAge)
 	if err != nil {
 		return err
 	}
@@ -84,34 +85,41 @@ func Serve(args []string) error {
 	defer cancel()
 	shutdownErr := httpServer.Shutdown(ctx)
 	teardownErr := registry.Shutdown()
+	codeTeardownErr := codeRegistry.Shutdown()
 
 	if shutdownErr != nil {
 		return shutdownErr
 	}
-	return teardownErr
+	if teardownErr != nil {
+		return teardownErr
+	}
+	return codeTeardownErr
 }
 
 // BuildEmbeddedServer wires up the same session-loading, alias-loading,
 // remote-resolving, and PTY-registry configuration used by `tsession
 // serve`. It is exported so the native GUI app (see gui/) can embed the
 // identical web UI server without duplicating this wiring. Callers own the
-// returned registry and must call registry.Shutdown() when done (this also
-// tears down every warm PTY).
-func BuildEmbeddedServer(maxAge time.Duration) (*webui.Server, *webterm.Registry, error) {
+// returned registries and must call both Shutdown() methods when done
+// (this also tears down every warm PTY and code server instance).
+func BuildEmbeddedServer(maxAge time.Duration) (*webui.Server, *webterm.Registry, *codeserver.Registry, error) {
 	if err := reapOrphanedLocal(); err != nil {
 		fmt.Fprintln(os.Stderr, "warning: failed to reap orphaned web sessions:", err)
 	}
 
 	registry := webterm.NewRegistry()
+	codeRegistry := codeserver.NewRegistry()
 
 	srv := webui.NewServer(
 		func() ([]sessions.Session, error) { return mergedSessionsForServe(maxAge) },
 		webui.WithAliases(reponames.Load),
 		webui.WithRemotes(remoteResolverFromConfig),
 		webui.WithTerminal(registry),
+		webui.WithCodeServer(codeRegistry, loadConfig),
+		webui.WithExternalOpener(openBrowser),
 	)
 
-	return srv, registry, nil
+	return srv, registry, codeRegistry, nil
 }
 
 // requireLoopback rejects any --addr that is not explicitly loopback. PTYs

@@ -74,8 +74,7 @@ func TestStaticAssets_ServesPWAIcons(t *testing.T) {
 	}
 }
 
-func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {
-	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -155,5 +154,182 @@ func TestStaticAssets_ServiceWorkerPrefersFreshShellAssets(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "return network.catch(() => cached)") {
 		t.Fatal("service worker is not network-first for shell assets")
+	}
+}
+
+func TestStaticAssets_CodePaneLayoutPresent(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	indexReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	indexRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(indexRec, indexReq)
+	for _, want := range []string{
+		`id="terminal-wrap"`,
+		`id="code-resize"`,
+		`id="code-pane"`,
+		`id="code-pane-header"`,
+		`id="code-pane-label"`,
+		`id="code-pane-status"`,
+		`id="code-pane-close"`,
+		`id="code-pane-body"`,
+	} {
+		if !strings.Contains(indexRec.Body.String(), want) {
+			t.Fatalf("index.html missing %q", want)
+		}
+	}
+
+	cssReq := httptest.NewRequest(http.MethodGet, "/app.css", nil)
+	cssRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(cssRec, cssReq)
+	for _, want := range []string{"--code-width", "#code-resize", ".code-frame"} {
+		if !strings.Contains(cssRec.Body.String(), want) {
+			t.Fatalf("app.css missing %q", want)
+		}
+	}
+
+	jsReq := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	jsRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(jsRec, jsReq)
+	for _, want := range []string{"setCodeWidth", "restoreCodeWidth", "tsession-code-width"} {
+		if !strings.Contains(jsRec.Body.String(), want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+}
+
+func TestStaticAssets_CodeViewAltEBehaviourPresent(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	jsReq := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	jsRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(jsRec, jsReq)
+	body := jsRec.Body.String()
+	for _, want := range []string{
+		`ev.code === "KeyE"`,
+		"toggleCodeView",
+		"closeCodeView",
+		"renderCodePane",
+		"/api/codeserver/",
+		`method: "DELETE"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+
+	indexReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	indexRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(indexRec, indexReq)
+	if !strings.Contains(indexRec.Body.String(), "Alt+E code view") {
+		t.Fatal("session list hint does not mention Alt+E")
+	}
+}
+
+func TestStaticAssets_UserInteractionsReportDebugEvents(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{
+		"function reportUserInteraction",
+		`"/api/debug"`,
+		`reportUserInteraction("select-session"`,
+		`reportUserInteraction("code-view-show"`,
+		`reportUserInteraction("code-view-hide"`,
+		`reportUserInteraction("code-view-close"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+}
+
+func TestStaticAssets_FailuresReportDebugEventsWithErrorLevel(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{
+		`function reportFailure`,
+		`"error"`,
+		`reportFailure("code-view-failed"`,
+		`reportFailure("code-view-start-failed"`,
+		`reportFailure("code-view-poll-failed"`,
+		`reportFailure("terminal-connect-failed"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("app.js missing %q", want)
+		}
+	}
+}
+
+// tmux signals a copy with OSC 52. xterm.js has no handler for it, so the
+// web terminal must register one or a copy made inside a session (most
+// visibly a remote one) never reaches this machine's clipboard.
+func TestStaticAssets_TerminalHandlesOSC52ClipboardWrites(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	body := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", path, rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	clip := body("/clipboard.js")
+	for _, want := range []string{"registerOscHandler", "52", "systemWriter"} {
+		if !strings.Contains(clip, want) {
+			t.Errorf("clipboard.js missing %q", want)
+		}
+	}
+
+	index := body("/")
+	if !strings.Contains(index, "/clipboard.js") {
+		t.Error("index.html does not load clipboard.js")
+	}
+
+	app := body("/app.js")
+	if !strings.Contains(app, "tsessionClipboard.install") {
+		t.Error("app.js does not install the OSC 52 clipboard handler on the terminal")
+	}
+
+	sw := body("/sw.js")
+	if !strings.Contains(sw, "/clipboard.js") {
+		t.Error("service worker does not cache clipboard.js")
+	}
+}
+
+// Keydowns inside the VS Code iframe never reach the parent document, so
+// Alt+/ would be dead while the code pane has focus unless the frame's own
+// window is hooked.
+func TestStaticAssets_CodePaneForwardsAltSlashToTerminal(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	body := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", path, rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	if !strings.Contains(body("/"), "/codekeys.js") {
+		t.Error("index.html does not load codekeys.js")
+	}
+	app := body("/app.js")
+	if !strings.Contains(app, "tsessionCodeKeys.install(iframe") {
+		t.Error("app.js does not install the code pane key handler on the VS Code iframe")
+	}
+	if !strings.Contains(body("/sw.js"), "/codekeys.js") {
+		t.Error("service worker does not cache codekeys.js")
 	}
 }

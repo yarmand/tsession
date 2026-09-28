@@ -13,6 +13,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/yarma/tsession/cmd"
+	"github.com/yarma/tsession/internal/codeserver"
 	"github.com/yarma/tsession/internal/webterm"
 )
 
@@ -29,6 +30,7 @@ type App struct {
 	mu           sync.RWMutex
 	listener     net.Listener
 	registry     *webterm.Registry
+	codeRegistry *codeserver.Registry
 	http         *http.Server
 	externalPort int
 }
@@ -56,7 +58,7 @@ func (a *App) startServerOnAddr(ctx context.Context, preferredAddr string) error
 		return fmt.Errorf("start embedded server listener: %w", err)
 	}
 
-	srv, registry, err := cmd.BuildEmbeddedServer(14 * 24 * time.Hour)
+	srv, registry, codeRegistry, err := cmd.BuildEmbeddedServer(14 * 24 * time.Hour)
 	if err != nil {
 		_ = listener.Close()
 		return fmt.Errorf("build embedded web UI server: %w", err)
@@ -67,6 +69,7 @@ func (a *App) startServerOnAddr(ctx context.Context, preferredAddr string) error
 	a.mu.Lock()
 	a.listener = listener
 	a.registry = registry
+	a.codeRegistry = codeRegistry
 	a.http = httpServer
 	a.mu.Unlock()
 
@@ -80,9 +83,11 @@ func (a *App) startServerOnAddr(ctx context.Context, preferredAddr string) error
 	if err := waitForServerReady(listener.Addr().(*net.TCPAddr).Port); err != nil {
 		_ = httpServer.Close()
 		_ = registry.Shutdown()
+		_ = codeRegistry.Shutdown()
 		a.mu.Lock()
 		a.listener = nil
 		a.registry = nil
+		a.codeRegistry = nil
 		a.http = nil
 		a.mu.Unlock()
 		return err
@@ -145,21 +150,26 @@ func (a *App) startup(ctx context.Context) {
 }
 
 // shutdown is Wails' OnShutdown hook: it stops the HTTP server and tears
-// down every warm PTY (registry.Shutdown runs each terminal's teardown
-// hook, e.g. `tmux kill-session` for grouped web sessions), mirroring
-// `tsession serve`'s Ctrl-C/SIGTERM behavior in cmd/serve.go.
+// down every warm PTY and code server instance (registry.Shutdown and
+// codeRegistry.Shutdown run each one's teardown hook, e.g. `tmux
+// kill-session` for grouped web sessions), mirroring `tsession serve`'s
+// Ctrl-C/SIGTERM behavior in cmd/serve.go.
 func (a *App) shutdown(ctx context.Context) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	a.mu.RLock()
 	httpServer := a.http
 	registry := a.registry
+	codeRegistry := a.codeRegistry
 	a.mu.RUnlock()
 	if httpServer != nil {
 		_ = httpServer.Shutdown(shutdownCtx)
 	}
 	if registry != nil {
 		_ = registry.Shutdown()
+	}
+	if codeRegistry != nil {
+		_ = codeRegistry.Shutdown()
 	}
 	_ = ctx
 }

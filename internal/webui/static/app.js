@@ -10,6 +10,8 @@
   // warm (see webterm.Registry) and a later re-attach replays its ring
   // buffer, so this is resource hygiene, not a data-loss risk.
   const PANE_CAP = 8;
+  const CODE_WIDTH_KEY = "tsession-code-width";
+  const nativeGUI = new URLSearchParams(window.location.search).get("gui") === "1";
 
   const state = {
     sessions: [],
@@ -22,6 +24,8 @@
     sidebarCollapsed: false,
     sidebarOverlay: false,
     sidebarResizing: false,
+    codeResizing: false,
+    codeViews: new Map(), // sessionKey -> { s, path, status, error, log, iframe, visible, pollTimer }
   };
 
   const appEl = document.getElementById("app");
@@ -37,6 +41,13 @@
   const renameInput = document.getElementById("rename-input");
   const renameTitle = document.getElementById("rename-modal-title");
   const renameError = document.getElementById("rename-error");
+  const codeResize = document.getElementById("code-resize");
+  const codePane = document.getElementById("code-pane");
+  const codePaneLabel = document.getElementById("code-pane-label");
+  const codePaneStatus = document.getElementById("code-pane-status");
+  const codePaneClose = document.getElementById("code-pane-close");
+  const codePaneBody = document.getElementById("code-pane-body");
+  const codePlaceholder = document.getElementById("code-pane-placeholder");
 
   function sessionKey(s) {
     return (s.origin || "") + "\u0000" + s.id;
@@ -383,6 +394,14 @@
     term.loadAddon(fitAddon);
     term.open(termContainer);
 
+    // tmux emits OSC 52 when it copies; xterm.js has no handler for it, so
+    // without this a copy inside the session never reaches this machine's
+    // clipboard (see static/clipboard.js).
+    window.tsessionClipboard.install(term, {
+      writeText: window.tsessionClipboard.systemWriter(navigator, document),
+      onError: (error) => reportFailure("terminal-clipboard-failed", s, String(error)),
+    });
+
     // pane is assigned below, but these closures capture the *variable*
     // (not its current value), so they safely see the finished object by
     // the time the user can trigger them.
@@ -474,6 +493,7 @@
     socket.addEventListener("error", () => {
       if (pane.socket === socket) {
         updatePaneStatus(pane, "error");
+        reportFailure("terminal-connect-failed", s);
         if (pane.key === state.activeKey) {
           showBanner("Failed to connect to session.");
         }
@@ -513,7 +533,43 @@
     bannerEl.classList.remove("hidden");
   }
 
+  function reportUserInteraction(action, s, detail = "", level = "info") {
+    const payload = {
+      action,
+      sessionId: s && s.id ? s.id : "",
+      origin: s && s.origin ? s.origin : "",
+      sessionName: s ? displayName(s) : "",
+      detail,
+      level,
+    };
+    const body = JSON.stringify(payload);
+    try {
+      if (navigator.sendBeacon) {
+        const blob = new Blob([body], { type: "application/json" });
+        if (navigator.sendBeacon("/api/debug", blob)) return;
+      }
+      fetch("/api/debug", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    } catch (e) {
+      // Debug logging must never block the UI.
+    }
+  }
+
+  // reportFailure is reportUserInteraction's "error" counterpart: any
+  // failure the client observes on its own (a code view failing to start,
+  // a poll erroring out, a terminal socket dying, ...) is reported the same
+  // way, so `grep level=error` in the serve log finds it regardless of
+  // whether the server or the browser detected it first.
+  function reportFailure(action, s, detail = "") {
+    reportUserInteraction(action, s, detail, "error");
+  }
+
   function selectSession(s) {
+    reportUserInteraction("select-session", s);
     if (state.sidebarCollapsed) {
       state.sidebarOverlay = false;
       updateSidebarState();
@@ -523,6 +579,7 @@
     const idx = state.sessions.findIndex((x) => sessionKey(x) === state.selectedKey);
     if (idx >= 0) state.listIndex = idx;
     renderSessions();
+    renderCodePane();
 
     emptyStateEl.classList.add("hidden");
     terminalEl.classList.remove("hidden");
@@ -538,6 +595,215 @@
     if (!pane || !pane.socket || pane.socket.readyState !== WebSocket.OPEN) return;
     const msg = JSON.stringify({ type: "resize", cols: pane.term.cols, rows: pane.term.rows });
     pane.socket.send(msg);
+  }
+
+  // --- Code view: an optional VS Code (code serve-web) pane docked next to
+  // the terminal, toggled with Alt+E while the session list is focused. It
+  // is scoped per session: state.codeViews holds one entry per session key
+  // that has ever been activated in this tab, each owning at most one
+  // retained <iframe> (never destroyed while its entry exists, only shown
+  // or hidden) plus the launch/poll bookkeeping for its backing
+  // codeserver.Instance. Switching sessions never stops anything server
+  // side — only the explicit close button (DELETE) does that.
+
+  function codeServerURL(s) {
+    const originSegment = s.origin ? encodeURIComponent(s.origin) : "local";
+    return "/api/codeserver/" + originSegment + "/" + encodeURIComponent(s.id);
+  }
+
+  function getOrCreateCodeView(s) {
+    const key = sessionKey(s);
+    let cv = state.codeViews.get(key);
+    if (!cv) {
+      cv = { s, path: null, status: "stopped", error: "", log: "", iframe: null, visible: false, pollTimer: null };
+      state.codeViews.set(key, cv);
+    }
+    cv.s = s;
+    return cv;
+  }
+
+  function stopPolling(cv) {
+    if (cv.pollTimer) {
+      clearTimeout(cv.pollTimer);
+      cv.pollTimer = null;
+    }
+  }
+
+  function pollCodeStatus(cv) {
+    stopPolling(cv);
+    cv.pollTimer = setTimeout(async () => {
+      cv.pollTimer = null;
+      try {
+        const resp = await fetch(codeServerURL(cv.s));
+        const data = await resp.json();
+        applyCodeStatus(cv, data);
+      } catch (e) {
+        cv.status = "failed";
+        cv.error = String(e);
+        reportFailure("code-view-poll-failed", cv.s, cv.error);
+        renderCodePane();
+      }
+      if (cv.status === "starting") pollCodeStatus(cv);
+    }, 1500);
+  }
+
+  function applyCodeStatus(cv, data) {
+    const wasFailed = cv.status === "failed";
+    cv.status = data.status || "stopped";
+    cv.error = data.error || "";
+    cv.log = data.log || "";
+    if (data.path) cv.path = data.path;
+    if (cv.status === "failed" && !wasFailed) {
+      reportFailure("code-view-failed", cv.s, cv.error);
+    }
+    if (cv.status === "running" && cv.path) ensureCodeIframe(cv);
+    renderCodePane();
+  }
+
+  function ensureCodeIframe(cv) {
+    if (cv.iframe) return;
+    const iframe = document.createElement("iframe");
+    iframe.className = "code-frame hidden";
+    iframe.title = "VS Code";
+    iframe.allow = "clipboard-read; clipboard-write";
+    window.tsessionPopupBridge.install(iframe, {
+      native: nativeGUI,
+      openExternal: async (url) => {
+        const response = await fetch("/api/open-external", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        if (!response.ok) throw new Error("Could not open sign-in window: " + await response.text());
+      },
+      onError: (error) => {
+        reportFailure("code-view-external-open-failed", cv.s, String(error));
+        codePaneStatus.textContent = "Could not open sign-in window";
+      },
+    });
+    window.tsessionCodeKeys.install(iframe, {
+      onFocusTerminal: focusTerminal,
+      onError: (error) => reportFailure("code-view-keys-failed", cv.s, String(error)),
+    });
+    iframe.src = cv.path;
+    codePaneBody.appendChild(iframe);
+    cv.iframe = iframe;
+  }
+
+  function placeholderMessage(cv) {
+    if (cv.status === "failed") {
+      return "VS Code failed to start" + (cv.error ? ":\n" + cv.error : ".") + (cv.log ? "\n\n" + cv.log : "");
+    }
+    if (cv.status === "stopped") return "Code view stopped.";
+    return "Starting VS Code\u2026\nThis can take a while on first run." + (cv.log ? "\n\n" + cv.log : "");
+  }
+
+  function statusLabel(status) {
+    switch (status) {
+      case "starting": return "starting\u2026";
+      case "running": return "";
+      case "failed": return "failed";
+      case "stopped": return "stopped";
+      default: return "";
+    }
+  }
+
+  // renderCodePane reconciles the DOM with state.codeViews for whichever
+  // session is currently selected: it hides every other session's iframe
+  // (they stay in the DOM, just hidden), then shows either the selected
+  // session's iframe (once running) or the placeholder (while starting,
+  // failed, or stopped) depending on its view's visibility.
+  function renderCodePane() {
+    const cv = state.selectedKey != null ? state.codeViews.get(state.selectedKey) : null;
+    const showPane = !!(cv && cv.visible);
+
+    state.codeViews.forEach((other) => {
+      if (other.iframe && other !== cv) other.iframe.classList.add("hidden");
+    });
+
+    codePane.classList.toggle("hidden", !showPane);
+    codeResize.classList.toggle("hidden", !showPane);
+
+    if (showPane) {
+      codePaneLabel.textContent = displayName(state.selectedSession);
+      codePaneStatus.textContent = statusLabel(cv.status);
+      if (cv.status === "running" && cv.iframe) {
+        cv.iframe.classList.remove("hidden");
+        codePlaceholder.classList.add("hidden");
+      } else {
+        if (cv.iframe) cv.iframe.classList.add("hidden");
+        codePlaceholder.textContent = placeholderMessage(cv);
+        codePlaceholder.classList.remove("hidden");
+      }
+    } else if (cv && cv.iframe) {
+      cv.iframe.classList.add("hidden");
+    }
+
+    if (state.fitAddon) requestAnimationFrame(() => state.fitAddon.fit());
+  }
+
+  // toggleCodeView is Alt+E's handler: it acts on the highlighted row,
+  // selecting it first if it isn't already selected, then toggles that
+  // session's code view — starting a code serve-web instance on first
+  // activation, or reusing (never relaunching) one that's already running.
+  async function toggleCodeView() {
+    if (state.listIndex == null) return;
+    const s = state.sessions[state.listIndex];
+    if (!s) return;
+    if (sessionKey(s) !== state.selectedKey) selectSession(s);
+
+    const cv = getOrCreateCodeView(s);
+    if (cv.visible) {
+      cv.visible = false;
+      reportUserInteraction("code-view-hide", s);
+      renderCodePane();
+      return;
+    }
+
+    cv.visible = true;
+    reportUserInteraction("code-view-show", s);
+    if (cv.status === "running" || cv.status === "starting") {
+      renderCodePane();
+      if (cv.status === "starting" && !cv.pollTimer) pollCodeStatus(cv);
+      return;
+    }
+
+    cv.status = "starting";
+    cv.error = "";
+    renderCodePane();
+    try {
+      const resp = await fetch(codeServerURL(s), { method: "POST" });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || (await resp.text()) || "failed to start");
+      applyCodeStatus(cv, data);
+      if (cv.status === "starting") pollCodeStatus(cv);
+    } catch (e) {
+      cv.status = "failed";
+      cv.error = String(e && e.message ? e.message : e);
+      reportFailure("code-view-start-failed", s, cv.error);
+      renderCodePane();
+    }
+  }
+
+  async function closeCodeView() {
+    if (!state.selectedSession) return;
+    const s = state.selectedSession;
+    const cv = state.codeViews.get(sessionKey(s));
+    if (!cv) return;
+    stopPolling(cv);
+    cv.visible = false;
+    cv.status = "stopped";
+    reportUserInteraction("code-view-close", s);
+    if (cv.iframe) {
+      cv.iframe.remove();
+      cv.iframe = null;
+    }
+    renderCodePane();
+    try {
+      await fetch(codeServerURL(s), { method: "DELETE" });
+    } catch (e) {
+      // Best-effort: the pane is already closed client-side regardless.
+    }
   }
 
   // --- Focus management: Alt+/ toggles keyboard focus between the session
@@ -556,6 +822,7 @@
     if (pane && state.selectedSession) pane.term.focus();
     updateSidebarState();
     updateFocusIndicator();
+    reportUserInteraction("focus-terminal", state.selectedSession);
   }
 
   function focusList() {
@@ -567,6 +834,7 @@
     updateSidebarState();
     updateFocusIndicator();
     renderSessions();
+    reportUserInteraction("focus-list", state.selectedSession);
   }
 
   function updateSidebarState() {
@@ -583,6 +851,7 @@
   function toggleSidebar() {
     state.sidebarCollapsed = !state.sidebarCollapsed;
     state.sidebarOverlay = false;
+    reportUserInteraction(state.sidebarCollapsed ? "sidebar-hide" : "sidebar-show", state.selectedSession);
     if (state.sidebarCollapsed && state.selectedSession) {
       focusTerminal();
       return;
@@ -608,6 +877,32 @@
     try {
       const width = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
       if (Number.isFinite(width) && width > 0) setSidebarWidth(width, false);
+    } catch (e) {
+      // Keep the CSS default when storage is unavailable.
+    }
+  }
+
+  // setCodeWidth/restoreCodeWidth mirror setSidebarWidth/restoreSidebarWidth
+  // exactly, but for the code pane on the opposite (right) edge of the
+  // window, so its width is computed from the distance between the cursor
+  // and the window's right edge rather than its left edge.
+  function setCodeWidth(px, persist = true) {
+    const maxWidth = Math.max(240, window.innerWidth * 0.85);
+    const width = Math.round(Math.max(240, Math.min(px, maxWidth)));
+    codePane.style.setProperty("--code-width", width + "px");
+    if (persist) {
+      try {
+        localStorage.setItem(CODE_WIDTH_KEY, String(width));
+      } catch (e) {
+        // Storage can be unavailable in restricted browser contexts.
+      }
+    }
+  }
+
+  function restoreCodeWidth() {
+    try {
+      const width = Number(localStorage.getItem(CODE_WIDTH_KEY));
+      if (Number.isFinite(width) && width > 0) setCodeWidth(width, false);
     } catch (e) {
       // Keep the CSS default when storage is unavailable.
     }
@@ -690,6 +985,18 @@
         return;
       }
 
+      // Alt+E toggles the code view for the highlighted session, but only
+      // while the session list panel is focused (not while typing into the
+      // terminal).
+      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "KeyE") {
+        if (state.focusTarget === "list") {
+          ev.preventDefault();
+          ev.stopPropagation();
+          toggleCodeView();
+        }
+        return;
+      }
+
       if (state.focusTarget === "terminal") {
         // Never intercept plain (unmodified) keys or Cmd/Ctrl+C/V/A/X so
         // native copy/paste/select-all keep working; suppress the rest of
@@ -760,6 +1067,10 @@
     ev.stopPropagation();
     toggleSidebar();
   });
+  codePaneClose.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    closeCodeView();
+  });
   sessionsResize.addEventListener("pointerdown", (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
@@ -778,9 +1089,33 @@
     if (sessionsResize.hasPointerCapture(ev.pointerId)) {
       sessionsResize.releasePointerCapture(ev.pointerId);
     }
+    reportUserInteraction("sidebar-resize", state.selectedSession, appEl.style.getPropertyValue("--sidebar-width"));
   }
   sessionsResize.addEventListener("pointerup", stopSidebarResize);
   sessionsResize.addEventListener("pointercancel", stopSidebarResize);
+
+  codeResize.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    state.codeResizing = true;
+    codeResize.setPointerCapture(ev.pointerId);
+    document.body.classList.add("resizing-code");
+  });
+  codeResize.addEventListener("pointermove", (ev) => {
+    if (!state.codeResizing) return;
+    setCodeWidth(window.innerWidth - ev.clientX);
+  });
+  function stopCodeResize(ev) {
+    if (!state.codeResizing) return;
+    state.codeResizing = false;
+    document.body.classList.remove("resizing-code");
+    if (codeResize.hasPointerCapture(ev.pointerId)) {
+      codeResize.releasePointerCapture(ev.pointerId);
+    }
+    reportUserInteraction("code-view-resize", state.selectedSession, codePane.style.getPropertyValue("--code-width"));
+  }
+  codeResize.addEventListener("pointerup", stopCodeResize);
+  codeResize.addEventListener("pointercancel", stopCodeResize);
 
   // --- Rename modal (sessions and repository aliases) ---
 
@@ -896,6 +1231,7 @@
   requestNotificationPermission();
   registerServiceWorker();
   restoreSidebarWidth();
+  restoreCodeWidth();
   refreshSessions();
   setInterval(refreshSessions, REFRESH_INTERVAL_MS);
   connectEvents();

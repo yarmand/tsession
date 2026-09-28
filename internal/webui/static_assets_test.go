@@ -266,3 +266,70 @@ func TestStaticAssets_FailuresReportDebugEventsWithErrorLevel(t *testing.T) {
 		}
 	}
 }
+
+// tmux signals a copy with OSC 52. xterm.js has no handler for it, so the
+// web terminal must register one or a copy made inside a session (most
+// visibly a remote one) never reaches this machine's clipboard.
+func TestStaticAssets_TerminalHandlesOSC52ClipboardWrites(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	body := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", path, rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	clip := body("/clipboard.js")
+	for _, want := range []string{"registerOscHandler", "52", "systemWriter"} {
+		if !strings.Contains(clip, want) {
+			t.Errorf("clipboard.js missing %q", want)
+		}
+	}
+
+	index := body("/")
+	if !strings.Contains(index, "/clipboard.js") {
+		t.Error("index.html does not load clipboard.js")
+	}
+
+	app := body("/app.js")
+	if !strings.Contains(app, "tsessionClipboard.install") {
+		t.Error("app.js does not install the OSC 52 clipboard handler on the terminal")
+	}
+
+	sw := body("/sw.js")
+	if !strings.Contains(sw, "/clipboard.js") {
+		t.Error("service worker does not cache clipboard.js")
+	}
+}
+
+// Keydowns inside the VS Code iframe never reach the parent document, so
+// Alt+/ would be dead while the code pane has focus unless the frame's own
+// window is hooked.
+func TestStaticAssets_CodePaneForwardsAltSlashToTerminal(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	body := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", path, rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	if !strings.Contains(body("/"), "/codekeys.js") {
+		t.Error("index.html does not load codekeys.js")
+	}
+	app := body("/app.js")
+	if !strings.Contains(app, "tsessionCodeKeys.install(iframe") {
+		t.Error("app.js does not install the code pane key handler on the VS Code iframe")
+	}
+	if !strings.Contains(body("/sw.js"), "/codekeys.js") {
+		t.Error("service worker does not cache codekeys.js")
+	}
+}

@@ -32,7 +32,7 @@
           return resp.json();
         })
         .then(function (data) {
-          window.location.replace("http://127.0.0.1:" + data.port + "/");
+          window.location.replace("http://127.0.0.1:" + data.port + "/?gui=1");
         })
         .catch(function () {
           if (attempt >= 100) {

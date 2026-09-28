@@ -248,3 +248,44 @@ func TestTunnelCommand_CustomSSHCommand(t *testing.T) {
 		t.Errorf("did not expect BatchMode for non-literal-ssh custom command:\n%s", joined)
 	}
 }
+
+// The dataDir passed to Build is a path on the machine running tsession. A
+// remote has its own filesystem and user, so sending that path verbatim made
+// VS Code try to mkdir a local-only path (e.g. /Users/... on a Linux host),
+// which fails with EACCES and takes down the extension host — breaking
+// anything that depends on extensions, including GitHub sign-in.
+func TestBuild_RemoteDoesNotLeakLocalDataDir(t *testing.T) {
+	s := sessions.Session{ID: "sess1", Origin: "box", CWD: "/home/wsluser/project"}
+	r := config.Remote{Name: "box", Type: "ssh", Host: "box.local"}
+	_, args, err := Build(s, r, nil, "/api/code/abc123", "/Users/mac/.tsession/codeserver/abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "/Users/mac") {
+		t.Errorf("remote command must not reference the local data dir:\n%s", joined)
+	}
+	if !strings.Contains(joined, "--server-data-dir") {
+		t.Errorf("remote command still needs its own --server-data-dir:\n%s", joined)
+	}
+	if !strings.Contains(joined, "$HOME") {
+		t.Errorf("remote data dir should live under the remote's own $HOME:\n%s", joined)
+	}
+	// The key keeps per-session state separate on the remote too.
+	if !strings.Contains(joined, "abc123") {
+		t.Errorf("remote data dir should be scoped per session key:\n%s", joined)
+	}
+}
+
+func TestBuild_RemoteCreatesItsOwnDataDir(t *testing.T) {
+	s := sessions.Session{ID: "sess1", Origin: "box", CWD: "/home/wsluser/project"}
+	r := config.Remote{Name: "box", Type: "ssh", Host: "box.local"}
+	_, args, err := Build(s, r, nil, "/api/code/abc123", "/Users/mac/.tsession/codeserver/abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "mkdir -p") {
+		t.Errorf("remote script should create its data dir before launching:\n%s", joined)
+	}
+}

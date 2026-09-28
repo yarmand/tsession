@@ -11,6 +11,7 @@
   // buffer, so this is resource hygiene, not a data-loss risk.
   const PANE_CAP = 8;
   const CODE_WIDTH_KEY = "tsession-code-width";
+  const nativeGUI = new URLSearchParams(window.location.search).get("gui") === "1";
 
   const state = {
     sessions: [],
@@ -393,6 +394,14 @@
     term.loadAddon(fitAddon);
     term.open(termContainer);
 
+    // tmux emits OSC 52 when it copies; xterm.js has no handler for it, so
+    // without this a copy inside the session never reaches this machine's
+    // clipboard (see static/clipboard.js).
+    window.tsessionClipboard.install(term, {
+      writeText: window.tsessionClipboard.systemWriter(navigator, document),
+      onError: (error) => reportFailure("terminal-clipboard-failed", s, String(error)),
+    });
+
     // pane is assigned below, but these closures capture the *variable*
     // (not its current value), so they safely see the finished object by
     // the time the user can trigger them.
@@ -655,8 +664,28 @@
     if (cv.iframe) return;
     const iframe = document.createElement("iframe");
     iframe.className = "code-frame hidden";
-    iframe.src = cv.path;
     iframe.title = "VS Code";
+    iframe.allow = "clipboard-read; clipboard-write";
+    window.tsessionPopupBridge.install(iframe, {
+      native: nativeGUI,
+      openExternal: async (url) => {
+        const response = await fetch("/api/open-external", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        if (!response.ok) throw new Error("Could not open sign-in window: " + await response.text());
+      },
+      onError: (error) => {
+        reportFailure("code-view-external-open-failed", cv.s, String(error));
+        codePaneStatus.textContent = "Could not open sign-in window";
+      },
+    });
+    window.tsessionCodeKeys.install(iframe, {
+      onFocusTerminal: focusTerminal,
+      onError: (error) => reportFailure("code-view-keys-failed", cv.s, String(error)),
+    });
+    iframe.src = cv.path;
     codePaneBody.appendChild(iframe);
     cv.iframe = iframe;
   }

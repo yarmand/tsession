@@ -70,7 +70,8 @@ type Server struct {
 	codeKeys       map[string]codeserver.Key
 	codeTransports map[string]*http.Transport
 
-	debugLogf func(format string, args ...any)
+	debugLogf    func(format string, args ...any)
+	openExternal func(string) error
 }
 
 // Option configures optional Server dependencies not every caller needs
@@ -96,6 +97,12 @@ func WithRemotes(fn RemoteResolver) Option {
 // Without it, the route responds 501 Not Implemented.
 func WithTerminal(registry *webterm.Registry) Option {
 	return func(s *Server) { s.registry = registry }
+}
+
+// WithExternalOpener lets the code view send blocked external links to the
+// host's default browser. Without it, /api/open-external is unavailable.
+func WithExternalOpener(open func(string) error) Option {
+	return func(s *Server) { s.openExternal = open }
 }
 
 // NewServer builds a Server from a SessionsProvider and optional Options.
@@ -156,6 +163,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/repos/alias", s.handleRepoAlias)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/debug", s.handleDebugEvent)
+	mux.HandleFunc("POST /api/open-external", s.handleOpenExternal)
 	mux.HandleFunc("GET /api/terminal/{origin}/{id}", s.handleTerminal)
 	mux.HandleFunc("POST /api/codeserver/{origin}/{id}", s.handleCodeServerStart)
 	mux.HandleFunc("GET /api/codeserver/{origin}/{id}", s.handleCodeServerStatus)

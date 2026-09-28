@@ -50,14 +50,27 @@ func LocalCodeBinary(cfg *config.Config) string {
 // directly on this host and r is ignored. For a remote session, r must be
 // the resolved config.Remote for s.Origin.
 func Build(s sessions.Session, r config.Remote, cfg *config.Config, basePath, dataDir string) (string, []string, error) {
-	args := serveWebArgs(basePath, s.CWD, dataDir)
-
 	if s.Origin == "" {
-		return LocalCodeBinary(cfg), args, nil
+		return LocalCodeBinary(cfg), serveWebArgs(basePath, s.CWD, dataDir), nil
 	}
 
-	script := launchScript(r, cfg, args)
+	// dataDir is a path on the host running tsession. A remote has its own
+	// filesystem and user, so sending it verbatim makes VS Code try to
+	// create a directory that cannot exist there (e.g. /Users/... on Linux).
+	// That fails the extension host outright, which breaks everything
+	// depending on extensions — GitHub sign-in included. Give the remote a
+	// path under its own $HOME instead, still scoped by session key.
+	args := serveWebArgs(basePath, s.CWD, "")
+	script := launchScript(r, cfg, args, RemoteDataDir(Key(s.Origin, s.ID)))
 	return shellutil.WrapRemoteTransport(r, script)
+}
+
+// RemoteDataDir returns the --server-data-dir for a code server running on a
+// remote host, as an unexpanded shell expression rooted at that host's own
+// $HOME. It mirrors the local layout (~/.tsession/codeserver/<key>) so each
+// session keeps separate VS Code state on either side.
+func RemoteDataDir(key string) string {
+	return `"$HOME/.tsession/codeserver/` + key + `"`
 }
 
 // serveWebArgs returns the `code serve-web` arguments shared by local and
@@ -65,6 +78,9 @@ func Build(s sessions.Session, r config.Remote, cfg *config.Config, basePath, da
 // whichever host it runs on (matching tsession serve's own loopback-only
 // posture); --port 0 lets the OS pick a free port, discovered afterward by
 // scanning the process's stdout for VS Code's "Web UI available at" line.
+//
+// An empty dataDir omits --server-data-dir: remote launches append it in the
+// script itself so it can reference the remote's own $HOME unquoted.
 func serveWebArgs(basePath, cwd, dataDir string) []string {
 	args := []string{
 		"serve-web",
@@ -73,7 +89,9 @@ func serveWebArgs(basePath, cwd, dataDir string) []string {
 		"--without-connection-token",
 		"--accept-server-license-terms",
 		"--server-base-path", basePath,
-		"--server-data-dir", dataDir,
+	}
+	if dataDir != "" {
+		args = append(args, "--server-data-dir", dataDir)
 	}
 	if cwd != "" {
 		args = append(args, "--default-folder", cwd)
@@ -84,12 +102,16 @@ func serveWebArgs(basePath, cwd, dataDir string) []string {
 // launchScript builds the shell script (without remote-transport wrapping)
 // that resolves the `code` binary — via r's explicit override if configured,
 // otherwise via the remote's own interactive login shell PATH — and execs it
-// with args.
-func launchScript(r config.Remote, cfg *config.Config, args []string) string {
+// with args plus a --server-data-dir of dataDir, which is inserted unquoted
+// so the remote shell expands it. The directory is created first: VS Code
+// aborts rather than creating missing parents.
+func launchScript(r config.Remote, cfg *config.Config, args []string, dataDir string) string {
+	tail := " " + shellutil.Join(args) + " --server-data-dir " + dataDir
+	mkdir := "mkdir -p " + dataDir + "; "
 	if bin := r.CodeBinary(cfg); bin != "" {
-		return "exec " + shellutil.Quote(bin) + " " + shellutil.Join(args)
+		return mkdir + "exec " + shellutil.Quote(bin) + tail
 	}
-	return shellutil.CodeResolverCommand() + `exec "$code_bin" ` + shellutil.Join(args)
+	return shellutil.CodeResolverCommand() + mkdir + `exec "$code_bin"` + tail
 }
 
 // TunnelCommand returns the binary and arguments to run a persistent,

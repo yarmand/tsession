@@ -14,9 +14,13 @@ gui:
 	@command -v $(WAILS) >/dev/null 2>&1 || { echo "error: wails is not installed. Install it with: go install github.com/wailsapp/wails/v2/cmd/wails@latest" >&2; exit 1; }
 	cd gui && $(WAILS) build $(WAILS_BUILD_FLAGS)
 
-install: build gui
+install-all: install install-gui
+
+install: build
 	mkdir -p $(PREFIX)
 	install -m 0755 $(BIN) $(PREFIX)/$(BIN)
+
+install-gui: gui
 	@case "$$(go env GOOS)" in \
 		darwin) \
 			test -d gui/build/bin/TSession.app || { echo "error: GUI artifact gui/build/bin/TSession.app was not produced" >&2; exit 1; }; \

@@ -85,7 +85,7 @@ Useful controls:
 
 | Control | Action |
 |---|---|
-| `Alt+/` | Toggle focus between the session list and terminal |
+| `Alt+/` | Toggle focus between the session list and terminal; from the code pane, move focus to the terminal |
 | `Alt+H` | Collapse or restore the session list |
 | `Alt+E` | Toggle a VS Code (`code serve-web`) pane for the highlighted session |
 | `↑` / `↓` | Move through the focused session list |
@@ -111,6 +111,21 @@ reach their `code serve-web` instance through the same server, tunnelling
 or relaying the connection as needed. See
 [docs/superpowers/specs/2026-09-18-code-view-design.md](docs/superpowers/specs/2026-09-18-code-view-design.md)
 for the full design.
+
+VS Code sign-in (for example Settings Sync) opens GitHub in your default
+browser. In the native GUI, external links and sign-in windows from the code
+pane open there instead of in an unsupported WebKit popup; in `tsession serve`
+a normal browser popup is attempted first, falling back to your default
+browser when it is blocked. The code pane also permits clipboard access for
+copying sign-in codes.
+
+Each code view keeps its VS Code state (extensions, settings) in
+`~/.tsession/codeserver/<key>` **on the host it runs on** — so a remote
+session's state lives under that remote's home directory, not yours.
+
+Text you copy inside the terminal — including from a remote session's tmux
+copy-mode — is placed on your local system clipboard, so you can paste it
+into any other app.
 
 ### 3. Add an SSH host
 

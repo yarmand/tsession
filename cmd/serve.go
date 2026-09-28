@@ -116,6 +116,7 @@ func BuildEmbeddedServer(maxAge time.Duration) (*webui.Server, *webterm.Registry
 		webui.WithRemotes(remoteResolverFromConfig),
 		webui.WithTerminal(registry),
 		webui.WithCodeServer(codeRegistry, loadConfig),
+		webui.WithExternalOpener(openBrowser),
 	)
 
 	return srv, registry, codeRegistry, nil

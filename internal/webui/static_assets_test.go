@@ -333,3 +333,19 @@ func TestStaticAssets_CodePaneForwardsAltSlashToTerminal(t *testing.T) {
 		t.Error("service worker does not cache codekeys.js")
 	}
 }
+
+// The browser terminal is always fed by a PTY, whose line discipline already
+// turns "\n" into "\r\n". tmux, however, deliberately emits a bare LF (the
+// xterm-256color cud1 capability) to move the cursor down *within the same
+// column* when drawing non-active split panes. xterm.js's convertEol would
+// turn that into CR+LF, snapping the cursor to column 0 and corrupting every
+// pane but the one at the left edge.
+func TestStaticAssets_TerminalDoesNotConvertEol(t *testing.T) {
+	data, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "convertEol: true") {
+		t.Fatal("app.js enables xterm.js convertEol, which breaks tmux split-pane rendering")
+	}
+}

@@ -378,8 +378,11 @@
     el.appendChild(connectingEl);
     terminalEl.appendChild(el);
 
+    // convertEol must stay off: output always comes from a PTY (which already
+    // maps "\n" to "\r\n"), and tmux uses a bare LF to move down within the
+    // same column when drawing split panes. Converting it to CR+LF corrupts
+    // every pane not at the left edge.
     const term = new Terminal({
-      convertEol: true,
       cursorBlink: true,
       fontSize: 13.5,
       // Courier New (xterm.js's default fallback) renders noticeably

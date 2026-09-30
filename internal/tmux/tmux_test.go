@@ -214,3 +214,23 @@ func TestResolveSessionName(t *testing.T) {
 		})
 	}
 }
+
+func TestShellJoin(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  string
+		args []string
+		want string
+	}{
+		{"plain", "tmux", []string{"new-session", "-d"}, "tmux new-session -d"},
+		{"spaced arg quoted", "tmux", []string{"new-session", "agency copilot --hub"}, "tmux new-session 'agency copilot --hub'"},
+		{"empty arg quoted", "bash", []string{"x", ""}, "bash x ''"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shellJoin(tc.cmd, tc.args); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

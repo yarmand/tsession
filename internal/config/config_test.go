@@ -258,3 +258,39 @@ func TestResumeCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadAgentCommand(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	err := os.WriteFile(cfgPath, []byte(`agent_command: "agency copilot --hub"
+remotes:
+  - name: devbox
+    host: devbox.local
+`), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentCommand != "agency copilot --hub" {
+		t.Fatalf("cfg.AgentCommand = %q, want %q", cfg.AgentCommand, "agency copilot --hub")
+	}
+	if got := cfg.AgentCommandOrDefault(); got != "agency copilot --hub" {
+		t.Errorf("AgentCommandOrDefault() = %q, want configured value", got)
+	}
+}
+
+func TestAgentCommandOrDefault(t *testing.T) {
+	if got := (&Config{}).AgentCommandOrDefault(); got != DefaultAgentCommand {
+		t.Errorf("empty config: got %q, want %q", got, DefaultAgentCommand)
+	}
+	if got := (*Config)(nil).AgentCommandOrDefault(); got != DefaultAgentCommand {
+		t.Errorf("nil config: got %q, want %q", got, DefaultAgentCommand)
+	}
+	if got := (&Config{AgentCommand: "  "}).AgentCommandOrDefault(); got != DefaultAgentCommand {
+		t.Errorf("whitespace config: got %q, want %q", got, DefaultAgentCommand)
+	}
+}

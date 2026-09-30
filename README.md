@@ -288,6 +288,14 @@ tsession new my-feature -- --resume
 
 Anything after `--` is forwarded to Copilot CLI.
 
+If `tsession new` exits without a clear error, re-run it with `-v` (or
+`--verbose`) to print every step, the exact commands tsession runs, and the
+stdout/stderr of the worktree script and tmux:
+
+```bash
+tsession new -v my-feature
+```
+
 The worktree creation command is configurable in
 `~/.config/tsession/new-worktree.sh`. The script receives the requested branch
 name as `$1` and must print the final worktree path as the last line of stdout.
@@ -305,6 +313,28 @@ echo "$wt_path"
 ```
 
 Edit the script freely to match your branch naming and worktree layout.
+
+### Which agent `new` starts
+
+By default `tsession new` runs `copilot` inside the new tmux session. Override
+the command it starts, in order of precedence:
+
+1. `--cmd` on the command line (per invocation):
+
+   ```bash
+   tsession new my-feature --cmd "agency copilot --hub"
+   tsession new my-feature --cmd pi
+   ```
+
+2. `agent_command` in `~/.config/tsession/config.yaml` (per host):
+
+   ```yaml
+   agent_command: "agency copilot --hub"
+   ```
+
+3. The built-in default, `copilot`.
+
+Arguments after `--` are forwarded to whichever agent command is chosen.
 
 ## Remote session management
 
@@ -488,8 +518,8 @@ notifications maintain an independent snapshot.
 
 ```text
 tsession list [flags]
-tsession new <branch> [-- copilot-args]
-tsession new [-p|--path <dir>] [-- copilot-args]
+tsession new [-v] [--cmd <command>] <branch> [-- agent-args]
+tsession new [-v] [--cmd <command>] [-p|--path <dir>] [-- agent-args]
 tsession browse [flags] [query]
 tsession popup [flags]
 tsession resume [--target=...] <session-id>

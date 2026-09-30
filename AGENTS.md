@@ -100,8 +100,8 @@ Pinned to bucket (`exited` always last; otherwise `tmux-attached` → `active no
 
 ```
 tsession list [flags]                        # print recent sessions to stdout
-tsession new <branch> [-- copilot-args]         # create worktree + tmux session, start copilot
-tsession new [-p|--path <dir>] [-- copilot-args] # start a session on an existing worktree (defaults to cwd)
+tsession new [-v] [--cmd <command>] <branch> [-- agent-args]         # create worktree + tmux session, start the agent
+tsession new [-v] [--cmd <command>] [-p|--path <dir>] [-- agent-args] # start a session on an existing worktree (defaults to cwd)
 tsession browse [flags] [q]                  # fzf picker in current terminal
 tsession popup [flags]                       # fzf picker designed for tmux popup
 tsession resume [--target=..] <session-id>   # switch tmux pane (or fall back)
@@ -116,10 +116,18 @@ tsession serve [--addr] [--open]             # loopback web UI: session list + b
 ## New Sessions (`new`)
 
 `tsession new <branch>` creates a git worktree, opens a tmux session named
-`basename(worktree-path)`, and starts copilot in it. `tsession new -p <dir>`
-(or `--path <dir>`) does the same on an existing worktree; with no branch and no
-path it uses the current working directory. Anything after `--` is forwarded to
-copilot.
+`basename(worktree-path)`, and starts the configured agent in it.
+`tsession new -p <dir>` (or `--path <dir>`) does the same on an existing
+worktree; with no branch and no path it uses the current working directory.
+Anything after `--` is forwarded to the agent command.
+
+The command started in the session is resolved with this precedence: the
+`--cmd` flag, then the top-level `agent_command` scalar in
+`~/.config/tsession/config.yaml` (`config.Config.AgentCommand`), then
+`config.DefaultAgentCommand` (`copilot`). `cmd/new.go` builds it via
+`buildAgentCommand(base, forwardedArgs)`, inserting `base` verbatim so
+multi-word commands like `agency copilot --hub` work and shell-quoting each
+forwarded arg. This replaced a previously hardcoded `agency copilot --hub`.
 
 The worktree-creation commands are configurable via `~/.config/tsession/new-worktree.sh`,
 auto-created with defaults on first run. The script receives the branch name as
@@ -128,6 +136,15 @@ default creates `<repo>.worktrees/<branch>` with a `$USER/<branch>` branch.
 
 If a tmux session with the target name already exists at the same path, `new`
 resumes it; if it exists at a different path, `new` uses a unique suffixed name.
+
+Pass `-v` (or `--verbose`) to trace the whole flow to stderr: each step, the
+exact `bash new-worktree.sh` and `tmux` commands run, the worktree script's
+stdout, and any tmux diagnostics. On failure tmux's own output is folded into
+the returned error even without `-v`. The command started *inside* the new tmux
+session (copilot/pi) runs detached, so its stdout/stderr are not captured by
+`-v` — attach to the session to see them. `tmux.NewSessionVerbose` and
+`tmux.SwitchClientTargetVerbose` (in `internal/tmux`) and `worktree.Create`'s
+`logw io.Writer` param carry the verbose writer; a nil writer means silent.
 
 ### Flags (`list`, `browse`, `popup`)
 

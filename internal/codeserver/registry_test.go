@@ -181,6 +181,11 @@ func TestInstance_ProcessExitBeforePortMarksFailed(t *testing.T) {
 		t.Fatal("instance did not exit in time")
 	}
 
+	waitFor(t, 3*time.Second, func() bool {
+		_, _, logTail, _ := in.Status()
+		return strings.Contains(string(logTail), "boom")
+	})
+
 	status, _, logTail, statusErr := in.Status()
 	if status != StatusFailed {
 		t.Fatalf("status = %s, want failed", status)

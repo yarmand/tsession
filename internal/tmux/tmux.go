@@ -1,14 +1,41 @@
 package tmux
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// shellJoin renders a command and its arguments for human-readable logging.
+// Any argument containing whitespace or quotes is single-quoted so the logged
+// line is an unambiguous representation of what was executed. Display only.
+func shellJoin(name string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, name)
+	for _, a := range args {
+		if a == "" || strings.ContainsAny(a, " \t\n'\"") {
+			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
+		} else {
+			parts = append(parts, a)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// logf writes a formatted verbose line to w when w is non-nil. It is the
+// single gate used across this package's verbose command variants.
+func logf(w io.Writer, format string, args ...any) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, format, args...)
+}
 
 type Session struct {
 	Name string
@@ -129,12 +156,21 @@ func SwitchClient(name string) error {
 // If clientTarget is empty, it switches the current client (default behavior).
 // clientTarget is resolved via ResolveTarget before use.
 func SwitchClientTarget(name, clientTarget string) error {
+	return SwitchClientTargetVerbose(name, clientTarget, nil)
+}
+
+// SwitchClientTargetVerbose is SwitchClientTarget with optional verbose
+// logging: when logw is non-nil it logs the exact tmux command executed and,
+// on failure, includes any tmux output in the returned error. Passing a nil
+// logw makes it behave identically to SwitchClientTarget.
+func SwitchClientTargetVerbose(name, clientTarget string, logw io.Writer) error {
 	resolved, err := ResolveTarget(clientTarget)
 	if err != nil {
 		return err
 	}
 
 	if !InTmux() {
+		logf(logw, "+ %s\n", shellJoin("tmux", []string{"attach-session", "-t", name}))
 		cmd := exec.Command("tmux", "attach-session", "-t", name)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
@@ -144,7 +180,18 @@ func SwitchClientTarget(name, clientTarget string) error {
 	if resolved != "" {
 		args = append(args, "-c", resolved)
 	}
-	return exec.Command("tmux", args...).Run()
+	logf(logw, "+ %s\n", shellJoin("tmux", args))
+	out, err := exec.Command("tmux", args...).CombinedOutput()
+	if logw != nil && len(bytes.TrimSpace(out)) > 0 {
+		logf(logw, "%s\n", strings.TrimSpace(string(out)))
+	}
+	if err != nil {
+		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
+			return fmt.Errorf("%w: %s", err, trimmed)
+		}
+		return err
+	}
+	return nil
 }
 
 // ResolveTarget resolves a --target value into a tmux client path.
@@ -178,7 +225,29 @@ func InTmux() bool { return os.Getenv("TMUX") != "" }
 // path, running command (interpreted by the shell). Use SwitchClientTarget to
 // focus it afterward.
 func NewSession(name, path, command string) error {
-	return exec.Command("tmux", "new-session", "-d", "-s", name, "-c", path, command).Run()
+	return NewSessionVerbose(name, path, command, nil)
+}
+
+// NewSessionVerbose is NewSession with optional verbose logging. When logw is
+// non-nil it logs the exact tmux command executed and any output tmux produced.
+// Regardless of logw, any tmux output on failure is folded into the returned
+// error so a failed `new-session` is never silent. Note that the shell command
+// runs *inside* the new detached session, so its own stdout/stderr are not
+// captured here — only tmux's own diagnostics are.
+func NewSessionVerbose(name, path, command string, logw io.Writer) error {
+	args := []string{"new-session", "-d", "-s", name, "-c", path, command}
+	logf(logw, "+ %s\n", shellJoin("tmux", args))
+	out, err := exec.Command("tmux", args...).CombinedOutput()
+	if logw != nil && len(bytes.TrimSpace(out)) > 0 {
+		logf(logw, "%s\n", strings.TrimSpace(string(out)))
+	}
+	if err != nil {
+		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
+			return fmt.Errorf("%w: %s", err, trimmed)
+		}
+		return err
+	}
+	return nil
 }
 
 // ResolveSessionName decides which tmux session name to use for a new session

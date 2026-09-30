@@ -17,6 +17,7 @@ func TestStaticAssets_ServesIndexAndVendoredFiles(t *testing.T) {
 		wantContent string
 	}{
 		{"/", "<div id=\"app\">"},
+		{"/app_logic.js", "LOCAL_TERMINAL"},
 		{"/app.js", "tsession"},
 		{"/app.css", "session-row"},
 		{"/vendor/xterm.js", "Terminal"},
@@ -115,8 +116,11 @@ func TestStaticAssets_SessionListCanCollapseAndOverlay(t *testing.T) {
 
 	for path, wants := range map[string][]string{
 		"/": {`id="sessions-toggle"`, `id="sessions-resize"`, "Alt+H hide"},
+		"/app_logic.js": {
+			`isPlainAltChord(ev, "KeyH")`,
+		},
 		"/app.js": {
-			`ev.code === "KeyH"`,
+			`appLogic.captureKeyAction(ev, state.focusTarget)`,
 			"sidebarOverlay",
 			"function toggleSidebar()",
 			`sessionsResize.addEventListener("pointerdown"`,
@@ -206,7 +210,7 @@ func TestStaticAssets_CodeViewAltEBehaviourPresent(t *testing.T) {
 	srv.Handler().ServeHTTP(jsRec, jsReq)
 	body := jsRec.Body.String()
 	for _, want := range []string{
-		`ev.code === "KeyE"`,
+		`appLogic.captureKeyAction(ev, state.focusTarget)`,
 		"toggleCodeView",
 		"closeCodeView",
 		"renderCodePane",
@@ -223,6 +227,13 @@ func TestStaticAssets_CodeViewAltEBehaviourPresent(t *testing.T) {
 	srv.Handler().ServeHTTP(indexRec, indexReq)
 	if !strings.Contains(indexRec.Body.String(), "Alt+E code view") {
 		t.Fatal("session list hint does not mention Alt+E")
+	}
+
+	logicReq := httptest.NewRequest(http.MethodGet, "/app_logic.js", nil)
+	logicRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(logicRec, logicReq)
+	if !strings.Contains(logicRec.Body.String(), `isPlainAltChord(ev, "KeyE")`) {
+		t.Fatal("app_logic.js does not define the Alt+E capture-phase chord")
 	}
 }
 
@@ -355,17 +366,22 @@ func TestStaticAssets_LocalTerminalRowIsPinnedAfterSessions(t *testing.T) {
 	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 
 	for path, wants := range map[string][]string{
-		"/app.js": {
-			`const LOCAL_TERMINAL = {`,
+		"/app_logic.js": {
+			`const LOCAL_TERMINAL = Object.freeze({`,
 			`localTerminal: true`,
-			"function listRows()",
-			"return state.sessions.concat([LOCAL_TERMINAL]);",
+			"function listRows(sessions)",
+			`return sessions.concat([LOCAL_TERMINAL]);`,
+			`function captureKeyAction(ev, focusTarget)`,
+			`return s.localTerminal`,
+			`? "/api/localterm"`,
+		},
+		"/app.js": {
 			"function openLocalTerminal()",
-			`ev.code === "KeyT"`,
-			`"/api/localterm"`,
+			`appLogic.captureKeyAction(ev, state.focusTarget)`,
+			`appLogic.terminalSocketPath(s)`,
 		},
 		"/app.css": {".session-row.local-terminal"},
-		"/":        {"Alt+T terminal"},
+		"/":        {"Alt+T terminal", "/app_logic.js"},
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
@@ -408,7 +424,11 @@ func TestStaticAssets_ServiceWorkerCacheVersionIsCurrent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
-	if !strings.Contains(rec.Body.String(), `const CACHE_NAME = "tsession-shell-v16";`) {
+	body := rec.Body.String()
+	if !strings.Contains(body, `const CACHE_NAME = "tsession-shell-v17";`) {
 		t.Fatal("sw.js CACHE_NAME was not bumped for this change")
+	}
+	if !strings.Contains(body, `"/app_logic.js"`) {
+		t.Fatal("sw.js does not cache app_logic.js")
 	}
 }

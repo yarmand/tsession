@@ -12,6 +12,7 @@
   const PANE_CAP = 8;
   const CODE_WIDTH_KEY = "tsession-code-width";
   const nativeGUI = new URLSearchParams(window.location.search).get("gui") === "1";
+  const appLogic = window.tsessionAppLogic;
 
   const state = {
     sessions: [],
@@ -33,18 +34,12 @@
   // `tsession new` without leaving the app. It is deliberately NOT pushed
   // into state.sessions: that array is replaced wholesale by every refresh
   // poll and is searched by real session ID for notifications.
-  const LOCAL_TERMINAL = {
-    id: "__local-terminal__",
-    origin: "",
-    localTerminal: true,
-    name: "Local terminal",
-    summary: "Shell in your home directory",
-  };
+  const LOCAL_TERMINAL = appLogic.LOCAL_TERMINAL;
 
   // listRows is the keyboard-navigable row model: every consumer of
   // state.listIndex indexes this, not state.sessions.
   function listRows() {
-    return state.sessions.concat([LOCAL_TERMINAL]);
+    return appLogic.listRows(state.sessions);
   }
 
   const appEl = document.getElementById("app");
@@ -338,9 +333,7 @@
       if (!resp.ok) return;
       const data = await resp.json();
       state.sessions = data.sessions || [];
-      if (state.listIndex == null) state.listIndex = 0;
-      const rowCount = listRows().length;
-      if (state.listIndex >= rowCount) state.listIndex = rowCount - 1;
+      state.listIndex = appLogic.clampListIndex(state.listIndex, state.sessions);
       renderSessions();
     } catch (e) {
       // Transient fetch failures are expected during server restarts; the
@@ -537,12 +530,9 @@
     if (pane.socket) return;
     updatePaneStatus(pane, "connecting");
 
-    const originSegment = s.origin ? encodeURIComponent(s.origin) : "local";
     // The pinned local terminal is not a discovered session, so it has its
     // own parameterless route rather than a /{origin}/{id} pair.
-    const path = s.localTerminal
-      ? "/api/localterm"
-      : "/api/terminal/" + originSegment + "/" + encodeURIComponent(s.id);
+    const path = appLogic.terminalSocketPath(s);
     const url = wsScheme() + "//" + location.host + path;
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
@@ -657,7 +647,7 @@
     }
     state.selectedSession = s;
     state.selectedKey = sessionKey(s);
-    const idx = listRows().findIndex((x) => sessionKey(x) === state.selectedKey);
+    const idx = appLogic.rowIndexForKey(state.sessions, state.selectedKey);
     if (idx >= 0) state.listIndex = idx;
     renderSessions();
     renderCodePane();
@@ -1063,40 +1053,26 @@
       const key = ev.key.toLowerCase();
       const mod = ev.metaKey || ev.ctrlKey;
 
-      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "KeyH") {
+      const captureAction = appLogic.captureKeyAction(ev, state.focusTarget);
+      if (captureAction) {
         ev.preventDefault();
         ev.stopPropagation();
-        toggleSidebar();
-        return;
-      }
-
-      // Alt+/ toggles focus regardless of which panel is currently focused.
-      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "Slash") {
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (state.focusTarget === "terminal") focusList();
-        else focusTerminal();
-        return;
-      }
-
-      // Alt+T jumps to the pinned local terminal from anywhere. It must be
-      // handled here, in the capture phase, because xterm.js's key handler
-      // would otherwise translate the chord into an ESC sequence and send
-      // it to the PTY (see altEscapeSequence).
-      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "KeyT") {
-        ev.preventDefault();
-        ev.stopPropagation();
-        openLocalTerminal();
-        return;
-      }
-
-      // Alt+E toggles the code view for the highlighted session, but only
-      // while the session list panel is focused (not while typing into the
-      // terminal).
-      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "KeyE") {
-        if (state.focusTarget === "list") {
-          ev.preventDefault();
-          ev.stopPropagation();
+        if (captureAction === "toggle-sidebar") {
+          toggleSidebar();
+        } else if (captureAction === "focus-list") {
+          focusList();
+        } else if (captureAction === "focus-terminal") {
+          focusTerminal();
+        } else if (captureAction === "open-local-terminal") {
+          // Alt+T jumps to the pinned local terminal from anywhere. It must
+          // be handled here, in the capture phase, because xterm.js's key
+          // handler would otherwise translate the chord into an ESC
+          // sequence and send it to the PTY (see altEscapeSequence).
+          openLocalTerminal();
+        } else if (captureAction === "toggle-code-view") {
+          // Alt+E toggles the code view for the highlighted session, but
+          // only while the session list panel is focused (not while typing
+          // into the terminal).
           toggleCodeView();
         }
         return;

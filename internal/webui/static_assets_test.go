@@ -74,7 +74,8 @@ func TestStaticAssets_ServesPWAIcons(t *testing.T) {
 	}
 }
 
-func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
 	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -347,5 +348,67 @@ func TestStaticAssets_TerminalDoesNotConvertEol(t *testing.T) {
 	}
 	if strings.Contains(string(data), "convertEol: true") {
 		t.Fatal("app.js enables xterm.js convertEol, which breaks tmux split-pane rendering")
+	}
+}
+
+func TestStaticAssets_LocalTerminalRowIsPinnedAfterSessions(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	for path, wants := range map[string][]string{
+		"/app.js": {
+			`const LOCAL_TERMINAL = {`,
+			`localTerminal: true`,
+			"function listRows()",
+			"return state.sessions.concat([LOCAL_TERMINAL]);",
+			"function openLocalTerminal()",
+			`ev.code === "KeyT"`,
+			`"/api/localterm"`,
+		},
+		"/app.css": {".session-row.local-terminal"},
+		"/":        {"Alt+T terminal"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", path, rec.Code)
+		}
+		for _, want := range wants {
+			if !strings.Contains(rec.Body.String(), want) {
+				t.Fatalf("GET %s: body missing %q", path, want)
+			}
+		}
+	}
+}
+
+// The pinned row is not an agent session, so the code view and the two
+// rename paths must skip it rather than sending it to an API that would
+// reject it.
+func TestStaticAssets_LocalTerminalRowIsNotRenamableOrCodeViewable(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		"if (!s || s.localTerminal) return;",
+		"if (s.localTerminal) return;",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("app.js missing guard %q", want)
+		}
+	}
+}
+
+// Any static asset change without a cache bump leaves the service worker
+// serving the previous app shell.
+func TestStaticAssets_ServiceWorkerCacheVersionIsCurrent(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), `const CACHE_NAME = "tsession-shell-v16";`) {
+		t.Fatal("sw.js CACHE_NAME was not bumped for this change")
 	}
 }

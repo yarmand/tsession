@@ -32,6 +32,25 @@ type Config struct {
 	// shellutil.CodeResolverCommand). A remote may override this with its
 	// own code_command.
 	CodeCommand string
+
+	// AgentCommand is the shell command `tsession new` runs inside the new
+	// tmux session to start the agent (e.g. "copilot", "pi",
+	// "agency copilot --hub"). Empty means use DefaultAgentCommand. The
+	// `--cmd` flag to `tsession new` overrides this per invocation.
+	AgentCommand string
+}
+
+// DefaultAgentCommand is the command `tsession new` starts in the session when
+// neither the `--cmd` flag nor config's agent_command is set.
+const DefaultAgentCommand = "copilot"
+
+// AgentCommandOrDefault returns the configured AgentCommand, or
+// DefaultAgentCommand when it is empty (including a nil receiver).
+func (c *Config) AgentCommandOrDefault() string {
+	if c != nil && strings.TrimSpace(c.AgentCommand) != "" {
+		return c.AgentCommand
+	}
+	return DefaultAgentCommand
 }
 
 // CodeBinary returns the `code` binary path to use for this remote: its own
@@ -178,6 +197,11 @@ func parse(s string) (*Config, error) {
 		// current remote list entry.
 		if indent == 0 && strings.HasPrefix(trimmed, "code_command:") {
 			cfg.CodeCommand = extractValue(trimmed[len("code_command:"):])
+			continue
+		}
+
+		if indent == 0 && strings.HasPrefix(trimmed, "agent_command:") {
+			cfg.AgentCommand = extractValue(trimmed[len("agent_command:"):])
 			continue
 		}
 

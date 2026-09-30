@@ -43,21 +43,26 @@ func TestValidateNewArgs(t *testing.T) {
 
 func TestParseNewArgs(t *testing.T) {
 	cases := []struct {
-		name       string
-		before     []string
-		wantBranch string
-		wantPath   string
-		wantErr    bool
+		name        string
+		before      []string
+		wantBranch  string
+		wantPath    string
+		wantCmd     string
+		wantVerbose bool
+		wantErr     bool
 	}{
-		{"branch only", []string{"feat"}, "feat", "", false},
-		{"long path", []string{"--path", "/tmp/wt"}, "", "/tmp/wt", false},
-		{"short path", []string{"-p", "/tmp/wt"}, "", "/tmp/wt", false},
-		{"no args defaults to cwd", nil, "", ".", false},
-		{"both branch and path", []string{"-p", "/tmp/wt", "feat"}, "", "", true},
+		{"branch only", []string{"feat"}, "feat", "", "", false, false},
+		{"long path", []string{"--path", "/tmp/wt"}, "", "/tmp/wt", "", false, false},
+		{"short path", []string{"-p", "/tmp/wt"}, "", "/tmp/wt", "", false, false},
+		{"no args defaults to cwd", nil, "", ".", "", false, false},
+		{"verbose short", []string{"-v", "feat"}, "feat", "", "", true, false},
+		{"verbose long", []string{"--verbose", "feat"}, "feat", "", "", true, false},
+		{"cmd override", []string{"--cmd", "pi --resume", "feat"}, "feat", "", "pi --resume", false, false},
+		{"both branch and path", []string{"-p", "/tmp/wt", "feat"}, "", "", "", false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			branch, path, err := parseNewArgs(tc.before)
+			branch, path, cmd, verbose, err := parseNewArgs(tc.before)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -70,15 +75,21 @@ func TestParseNewArgs(t *testing.T) {
 			if branch != tc.wantBranch || path != tc.wantPath {
 				t.Fatalf("got (%q,%q), want (%q,%q)", branch, path, tc.wantBranch, tc.wantPath)
 			}
+			if cmd != tc.wantCmd {
+				t.Fatalf("cmd: got %q, want %q", cmd, tc.wantCmd)
+			}
+			if verbose != tc.wantVerbose {
+				t.Fatalf("verbose: got %t, want %t", verbose, tc.wantVerbose)
+			}
 		})
 	}
 }
 
-func TestBuildCopilotCommand(t *testing.T) {
-	if got := buildCopilotCommand(nil); got != "agency copilot --hub" {
-		t.Errorf("got %q, want agency copilot --hub", got)
+func TestBuildAgentCommand(t *testing.T) {
+	if got := buildAgentCommand("copilot", nil); got != "copilot" {
+		t.Errorf("got %q, want copilot", got)
 	}
-	if got := buildCopilotCommand([]string{"--resume", "x y"}); got != "agency copilot --hub '--resume' 'x y'" {
+	if got := buildAgentCommand("agency copilot --hub", []string{"--resume", "x y"}); got != "agency copilot --hub '--resume' 'x y'" {
 		t.Errorf("got %q", got)
 	}
 }

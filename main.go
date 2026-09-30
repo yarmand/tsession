@@ -62,8 +62,8 @@ func usage() {
 
 Usage:
   tsession list                List recent sessions (text)
-  tsession new <branch> [-- copilot-args]      Create a worktree + tmux session and start copilot
-  tsession new [-p|--path <dir>] [-- copilot-args]  Start a session on an existing worktree (defaults to cwd)
+  tsession new [-v] [--cmd <command>] <branch> [-- agent-args]      Create a worktree + tmux session and start the agent
+  tsession new [-v] [--cmd <command>] [-p|--path <dir>] [-- agent-args]  Start a session on an existing worktree (defaults to cwd)
   tsession browse [flags] [q]  fzf picker (auto-launches tmux if outside)
   tsession popup [flags]       fzf picker designed for tmux popup
   tsession resume [--target=..] <session-id>  Switch tmux to session

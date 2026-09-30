@@ -258,6 +258,19 @@ body.resizing-sidebar {
   font-size: 11px;
 }
 
+.session-row.local-terminal {
+  border-top: 1px solid var(--border, #2a2a2a);
+  margin-top: 4px;
+}
+
+.session-row.local-terminal .glyph {
+  color: var(--active);
+}
+
+.session-row.local-terminal .worktree {
+  font-weight: 600;
+}
+
 #terminal-pane {
   position: relative;
   flex: 1 1 auto;

@@ -12,6 +12,7 @@
   const PANE_CAP = 8;
   const CODE_WIDTH_KEY = "tsession-code-width";
   const nativeGUI = new URLSearchParams(window.location.search).get("gui") === "1";
+  const appLogic = window.tsessionAppLogic;
 
   const state = {
     sessions: [],
@@ -27,6 +28,19 @@
     codeResizing: false,
     codeViews: new Map(), // sessionKey -> { s, path, status, error, log, iframe, visible, pollTimer }
   };
+
+  // The dedicated local terminal is rendered as a pinned row after the real
+  // sessions so there is always somewhere to run commands like
+  // `tsession new` without leaving the app. It is deliberately NOT pushed
+  // into state.sessions: that array is replaced wholesale by every refresh
+  // poll and is searched by real session ID for notifications.
+  const LOCAL_TERMINAL = appLogic.LOCAL_TERMINAL;
+
+  // listRows is the keyboard-navigable row model: every consumer of
+  // state.listIndex indexes this, not state.sessions.
+  function listRows() {
+    return appLogic.listRows(state.sessions);
+  }
 
   const appEl = document.getElementById("app");
   const sessionsEl = document.getElementById("sessions");
@@ -210,7 +224,53 @@
       });
       listEl.appendChild(li);
     });
+    renderLocalTerminalRow(state.sessions.length);
     renderSessionInfo();
+  }
+
+  // renderLocalTerminalRow appends the pinned row. It shows none of an
+  // agent session's decorations (state glyph, source, repository, age,
+  // summary-from-the-agent) because it has no agent behind it.
+  function renderLocalTerminalRow(index) {
+    const key = sessionKey(LOCAL_TERMINAL);
+    const li = document.createElement("li");
+    let cls = "session-row local-terminal";
+    if (key === state.selectedKey) cls += " selected";
+    if (state.focusTarget === "list" && index === state.listIndex) cls += " cursor";
+    li.className = cls;
+    li.dataset.key = key;
+
+    const line1 = document.createElement("div");
+    line1.className = "line1";
+
+    const glyph = document.createElement("span");
+    glyph.className = "glyph";
+    glyph.textContent = "\u276F"; // ❯
+    line1.appendChild(glyph);
+
+    const label = document.createElement("span");
+    label.className = "worktree";
+    label.textContent = LOCAL_TERMINAL.name;
+    label.title = "Persistent shell in your home directory (Alt+T)";
+    line1.appendChild(label);
+
+    const shortcut = document.createElement("span");
+    shortcut.className = "age";
+    shortcut.textContent = "Alt+T";
+    line1.appendChild(shortcut);
+
+    li.appendChild(line1);
+
+    const summary = document.createElement("div");
+    summary.className = "summary";
+    summary.textContent = LOCAL_TERMINAL.summary;
+    li.appendChild(summary);
+
+    li.addEventListener("click", () => {
+      state.listIndex = index;
+      selectSession(LOCAL_TERMINAL);
+    });
+    listEl.appendChild(li);
   }
 
   function infoValue(value, fallback = "\u2014") {
@@ -233,12 +293,21 @@
 
   function renderSessionInfo() {
     infoEl.innerHTML = "";
-    const s = state.sessions[state.listIndex];
+    const s = listRows()[state.listIndex];
     if (!s) {
       const empty = document.createElement("div");
       empty.className = "info-empty";
       empty.textContent = "Select a session to inspect.";
       infoEl.appendChild(empty);
+      return;
+    }
+
+    if (s.localTerminal) {
+      addInfoRow("Name", s.name);
+      addInfoRow("Kind", "local terminal");
+      addInfoRow("CWD", "home directory");
+      addInfoRow("Tmux", "tsession-local");
+      addInfoRow("Summary", s.summary, "info-summary");
       return;
     }
 
@@ -264,10 +333,7 @@
       if (!resp.ok) return;
       const data = await resp.json();
       state.sessions = data.sessions || [];
-      if (state.listIndex == null) state.listIndex = 0;
-      if (state.listIndex >= state.sessions.length) {
-        state.listIndex = Math.max(0, state.sessions.length - 1);
-      }
+      state.listIndex = appLogic.clampListIndex(state.listIndex, state.sessions);
       renderSessions();
     } catch (e) {
       // Transient fetch failures are expected during server restarts; the
@@ -464,8 +530,10 @@
     if (pane.socket) return;
     updatePaneStatus(pane, "connecting");
 
-    const originSegment = s.origin ? encodeURIComponent(s.origin) : "local";
-    const url = wsScheme() + "//" + location.host + "/api/terminal/" + originSegment + "/" + encodeURIComponent(s.id);
+    // The pinned local terminal is not a discovered session, so it has its
+    // own parameterless route rather than a /{origin}/{id} pair.
+    const path = appLogic.terminalSocketPath(s);
+    const url = wsScheme() + "//" + location.host + path;
     const socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
     pane.socket = socket;
@@ -579,7 +647,7 @@
     }
     state.selectedSession = s;
     state.selectedKey = sessionKey(s);
-    const idx = state.sessions.findIndex((x) => sessionKey(x) === state.selectedKey);
+    const idx = appLogic.rowIndexForKey(state.sessions, state.selectedKey);
     if (idx >= 0) state.listIndex = idx;
     renderSessions();
     renderCodePane();
@@ -750,9 +818,10 @@
   // session's code view — starting a code serve-web instance on first
   // activation, or reusing (never relaunching) one that's already running.
   async function toggleCodeView() {
-    if (state.listIndex == null) return;
-    const s = state.sessions[state.listIndex];
+    const s = cursorSession();
     if (!s) return;
+    // The pinned local terminal has no repository to open in VS Code.
+    if (s.localTerminal) return;
     if (sessionKey(s) !== state.selectedKey) selectSession(s);
 
     const cv = getOrCreateCodeView(s);
@@ -917,36 +986,48 @@
   }
 
   function moveListCursor(delta) {
-    if (state.sessions.length === 0) return;
+    const rows = listRows();
+    if (rows.length === 0) return;
     const cur = state.listIndex == null ? 0 : state.listIndex;
-    state.listIndex = Math.min(state.sessions.length - 1, Math.max(0, cur + delta));
+    state.listIndex = Math.min(rows.length - 1, Math.max(0, cur + delta));
     renderSessions();
     const row = listEl.children[state.listIndex];
     if (row) row.scrollIntoView({ block: "nearest" });
   }
 
   function attachHighlighted() {
-    if (state.listIndex == null) return;
-    const s = state.sessions[state.listIndex];
+    const s = cursorSession();
     if (s) selectSession(s);
   }
 
   function cursorSession() {
     if (state.listIndex == null) return null;
-    return state.sessions[state.listIndex] || null;
+    return listRows()[state.listIndex] || null;
   }
 
   // renameCursorSession/renameCursorRepo mirror the TUI picker's ctrl-n /
-  // ctrl-a bindings, acting on the keyboard cursor row.
+  // ctrl-a bindings, acting on the keyboard cursor row. The pinned local
+  // terminal has no stored name and no repository, so both skip it.
   function renameCursorSession() {
     const s = cursorSession();
-    if (s) openRenameModal("session", s.id, s.name || "");
+    if (!s || s.localTerminal) return;
+    openRenameModal("session", s.id, s.name || "");
   }
 
   function renameCursorRepo() {
     const s = cursorSession();
-    if (!s || !s.repositoryId) return;
+    if (!s || s.localTerminal) return;
+    if (!s.repositoryId) return;
     openRenameModal("repo", s.repositoryId, s.repository || "");
+  }
+
+  // openLocalTerminal is Alt+T's handler. Unlike Alt+E it works from either
+  // panel, including while the terminal has focus, so the shell is always
+  // one chord away.
+  function openLocalTerminal() {
+    state.listIndex = listRows().length - 1;
+    selectSession(LOCAL_TERMINAL);
+    focusTerminal();
   }
 
   const SUPPRESSABLE_KEYS = new Set([
@@ -972,29 +1053,26 @@
       const key = ev.key.toLowerCase();
       const mod = ev.metaKey || ev.ctrlKey;
 
-      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "KeyH") {
+      const captureAction = appLogic.captureKeyAction(ev, state.focusTarget);
+      if (captureAction) {
         ev.preventDefault();
         ev.stopPropagation();
-        toggleSidebar();
-        return;
-      }
-
-      // Alt+/ toggles focus regardless of which panel is currently focused.
-      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "Slash") {
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (state.focusTarget === "terminal") focusList();
-        else focusTerminal();
-        return;
-      }
-
-      // Alt+E toggles the code view for the highlighted session, but only
-      // while the session list panel is focused (not while typing into the
-      // terminal).
-      if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === "KeyE") {
-        if (state.focusTarget === "list") {
-          ev.preventDefault();
-          ev.stopPropagation();
+        if (captureAction === "toggle-sidebar") {
+          toggleSidebar();
+        } else if (captureAction === "focus-list") {
+          focusList();
+        } else if (captureAction === "focus-terminal") {
+          focusTerminal();
+        } else if (captureAction === "open-local-terminal") {
+          // Alt+T jumps to the pinned local terminal from anywhere. It must
+          // be handled here, in the capture phase, because xterm.js's key
+          // handler would otherwise translate the chord into an ESC
+          // sequence and send it to the PTY (see altEscapeSequence).
+          openLocalTerminal();
+        } else if (captureAction === "toggle-code-view") {
+          // Alt+E toggles the code view for the highlighted session, but
+          // only while the session list panel is focused (not while typing
+          // into the terminal).
           toggleCodeView();
         }
         return;

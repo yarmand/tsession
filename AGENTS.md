@@ -173,6 +173,7 @@ session/pane match shown by an interactive remote list.
 ## Session Names
 
 Picker shortcuts:
+- `Alt+T` Attach to the pinned local terminal (works from either panel)
 - `ctrl-n` Rename session
 - `ctrl-a` Rename repository
 
@@ -320,6 +321,29 @@ accurate anyway, since the far end is an xterm.js emulator.
 `::1`, or literal `localhost`); anything else is rejected before the listener
 binds. There is no auth, TLS, or non-loopback access in v1 — PTYs must never
 be reachable off-host.
+
+### Local terminal (`Alt+T`)
+
+A pinned **Local terminal** row sits after the session list and is always
+present, even with no agent sessions. `Alt+T` attaches to it from either
+panel (it is handled in the document's capture phase so xterm.js does not
+translate the chord into an ESC sequence first).
+
+It is not a discovered session: it has no agent state, rename, repository
+alias, code view, or notifications, and `GET /api/localterm`
+(`internal/webui/localterm.go`) takes no parameters at all — the command,
+tmux target, and working directory are fixed by the server, and the session
+list is never consulted.
+
+Its shell lives in a tmux session named `attachcmd.LocalSessionName`
+(`tsession-local`), created lazily in `$HOME` on first attach and running the
+user's default shell. That name deliberately avoids `tmux.WebSessionPrefix`,
+because `webterm.ReapOrphanedLocal` kills every prefixed session at startup.
+The browser attaches through the usual ephemeral grouped session
+(`attachcmd.LocalWebSessionName()`), and teardown — `attachcmd.BuildLocalKill`
+— kills only that grouped session. **tsession never kills `tsession-local`**,
+which is what makes the shell and its scrollback survive closing the browser,
+`serve`, or the GUI.
 
 ### Code view (`Alt+E`)
 

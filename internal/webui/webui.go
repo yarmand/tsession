@@ -55,6 +55,7 @@ type Server struct {
 	aliasesFn  AliasesProvider
 	remoteFn   RemoteResolver
 	registry   *webterm.Registry
+	homeDirFn  func() (string, error)
 	now        func() time.Time
 
 	sessionCache *sessionCache
@@ -65,6 +66,8 @@ type Server struct {
 	codeRegistry *codeserver.Registry
 	codeCfgFn    CodeConfigProvider
 	codeDataDir  string
+
+	localTermMu sync.Mutex
 
 	codeKeysMu     sync.Mutex
 	codeKeys       map[string]codeserver.Key
@@ -111,6 +114,7 @@ func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
 		sessionsFn:      sessionsFn,
 		aliasesFn:       func() (map[string]string, error) { return nil, nil },
 		now:             time.Now,
+		homeDirFn:       os.UserHomeDir,
 		notifyStorePath: defaultNotifyStorePath(),
 		pollInterval:    3 * time.Second,
 		codeDataDir:     defaultCodeDataDir(),
@@ -153,6 +157,14 @@ func (s *Server) SetDebugLog(fn func(format string, args ...any)) {
 	s.debugLogf = fn
 }
 
+// SetLocalTerminalHome overrides how the dedicated local terminal resolves
+// its starting directory. Tests use this to exercise the failure path
+// without touching the real environment; production callers leave the
+// os.UserHomeDir default.
+func (s *Server) SetLocalTerminalHome(fn func() (string, error)) {
+	s.homeDirFn = fn
+}
+
 // Handler returns an http.Handler serving this Server's API routes, mounted
 // at their final paths (e.g. "/api/sessions"). Callers combine it with
 // static asset handlers as needed.
@@ -165,6 +177,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/debug", s.handleDebugEvent)
 	mux.HandleFunc("POST /api/open-external", s.handleOpenExternal)
 	mux.HandleFunc("GET /api/terminal/{origin}/{id}", s.handleTerminal)
+	mux.HandleFunc("GET /api/localterm", s.handleLocalTerminal)
 	mux.HandleFunc("POST /api/codeserver/{origin}/{id}", s.handleCodeServerStart)
 	mux.HandleFunc("GET /api/codeserver/{origin}/{id}", s.handleCodeServerStatus)
 	mux.HandleFunc("DELETE /api/codeserver/{origin}/{id}", s.handleCodeServerStop)

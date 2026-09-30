@@ -139,3 +139,51 @@ func TestHandleLocalTerminal_HomeDirFailureIsReportedAndLogged(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleLocalTerminal_ExitedWarmPTYIsDiscardedBeforeRestart(t *testing.T) {
+	registry := webterm.NewRegistry()
+	t.Cleanup(func() { _ = registry.Shutdown() })
+
+	srv := NewServer(
+		func() ([]sessions.Session, error) { return nil, nil },
+		WithTerminal(registry),
+	)
+
+	key := webterm.Key{Origin: "", ID: attachcmd.LocalTerminalID}
+	stale, err := registry.Attach(key, webterm.Spec{Bin: "sh", Args: []string{"-c", "exit 0"}})
+	if err != nil {
+		t.Fatalf("pre-attach: %v", err)
+	}
+
+	select {
+	case <-stale.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for stale terminal to exit")
+	}
+
+	exited, _ := stale.Exited()
+	if !exited {
+		t.Fatal("expected the pre-attached terminal to have exited")
+	}
+
+	srv.SetLocalTerminalHome(func() (string, error) { return "", errors.New("fresh startup failed") })
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/localterm"
+	conn, resp, err := websocket.Dial(context.Background(), url, nil)
+	if err == nil {
+		conn.CloseNow()
+		t.Fatal("expected dial to fail after stale local terminal cleanup")
+	}
+	if resp == nil || resp.StatusCode != 500 {
+		t.Fatalf("expected 500, got resp=%+v", resp)
+	}
+	if got, ok := registry.Get(key); ok {
+		if got == stale {
+			t.Fatal("expected exited terminal to be removed from the registry")
+		}
+		t.Fatalf("expected no terminal to remain registered after failed restart, got %+v", got)
+	}
+}

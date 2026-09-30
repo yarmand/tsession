@@ -67,6 +67,8 @@ type Server struct {
 	codeCfgFn    CodeConfigProvider
 	codeDataDir  string
 
+	localTermMu sync.Mutex
+
 	codeKeysMu     sync.Mutex
 	codeKeys       map[string]codeserver.Key
 	codeTransports map[string]*http.Transport

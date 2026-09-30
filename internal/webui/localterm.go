@@ -29,38 +29,60 @@ func (s *Server) handleLocalTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := webterm.Key{Origin: "", ID: attachcmd.LocalTerminalID}
-
-	term, ok := s.registry.Live(key)
-	if !ok {
-		home, err := s.homeDirFn()
-		if err != nil {
-			s.failLocalTerminal(w, "cannot determine the home directory", err)
-			return
-		}
-		bin, args, err := attachcmd.BuildLocal(home)
-		if err != nil {
-			s.failLocalTerminal(w, "cannot build the local terminal command", err)
-			return
-		}
-
-		teardown := func() error {
-			killBin, killArgs := attachcmd.BuildLocalKill()
-			// Best-effort: the grouped session may already be gone. The
-			// persistent shell session is deliberately left running.
-			_ = exec.Command(killBin, killArgs...).Run()
-			return nil
-		}
-
-		term, err = s.registry.Attach(key, webterm.Spec{
-			Bin: bin, Args: args, Rows: 24, Cols: 80, Teardown: teardown,
-		})
-		if err != nil {
-			s.failLocalTerminal(w, "cannot start the local terminal", err)
-			return
-		}
+	term, err := s.ensureLocalTerminal(key)
+	if err != nil {
+		s.failLocalTerminal(w, err.msg, err.err)
+		return
 	}
 
 	s.bridgeTerminal(w, r, term)
+}
+
+type localTerminalError struct {
+	msg string
+	err error
+}
+
+func (e *localTerminalError) Error() string { return e.msg + ": " + e.err.Error() }
+
+func (s *Server) ensureLocalTerminal(key webterm.Key) (*webterm.Terminal, *localTerminalError) {
+	s.localTermMu.Lock()
+	defer s.localTermMu.Unlock()
+
+	if term, ok := s.registry.Live(key); ok {
+		exited, _ := term.Exited()
+		if !exited {
+			return term, nil
+		}
+		if err := s.registry.Close(key); err != nil {
+			return nil, &localTerminalError{msg: "cannot reset the exited local terminal", err: err}
+		}
+	}
+
+	home, err := s.homeDirFn()
+	if err != nil {
+		return nil, &localTerminalError{msg: "cannot determine the home directory", err: err}
+	}
+	bin, args, err := attachcmd.BuildLocal(home)
+	if err != nil {
+		return nil, &localTerminalError{msg: "cannot build the local terminal command", err: err}
+	}
+
+	teardown := func() error {
+		killBin, killArgs := attachcmd.BuildLocalKill()
+		// Best-effort: the grouped session may already be gone. The
+		// persistent shell session is deliberately left running.
+		_ = exec.Command(killBin, killArgs...).Run()
+		return nil
+	}
+
+	term, err := s.registry.Attach(key, webterm.Spec{
+		Bin: bin, Args: args, Rows: 24, Cols: 80, Teardown: teardown,
+	})
+	if err != nil {
+		return nil, &localTerminalError{msg: "cannot start the local terminal", err: err}
+	}
+	return term, nil
 }
 
 // failLocalTerminal reports a startup failure to the browser (which shows it

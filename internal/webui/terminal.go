@@ -107,6 +107,16 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.bridgeTerminal(w, r, term)
+}
+
+// bridgeTerminal upgrades the request to a WebSocket and pumps bytes
+// between it and term for the life of the connection: PTY output is sent as
+// binary messages, client keystrokes arrive as binary messages, and JSON
+// text messages carry out-of-band control instructions (resize). Returning
+// only ends this one connection — the PTY itself outlives it, so closing a
+// browser tab merely unsubscribes.
+func (s *Server) bridgeTerminal(w http.ResponseWriter, r *http.Request, term *webterm.Terminal) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		// Accept has already written an error response.

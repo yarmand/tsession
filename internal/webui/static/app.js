@@ -26,6 +26,8 @@
     sidebarOverlay: false,
     sidebarResizing: false,
     codeResizing: false,
+    activeContentPane: "terminal", // "terminal" | "code"
+    zoomedPane: null, // null | "terminal" | "code"
     codeViews: new Map(), // sessionKey -> { s, path, status, error, log, iframe, visible, pollTimer }
   };
 
@@ -43,6 +45,7 @@
   }
 
   const appEl = document.getElementById("app");
+  const terminalPane = document.getElementById("terminal-pane");
   const sessionsEl = document.getElementById("sessions");
   const sessionsToggle = document.getElementById("sessions-toggle");
   const sessionsResize = document.getElementById("sessions-resize");
@@ -51,6 +54,7 @@
   const terminalEl = document.getElementById("terminal");
   const emptyStateEl = document.getElementById("empty-state");
   const bannerEl = document.getElementById("terminal-banner");
+  const terminalZoom = document.getElementById("terminal-zoom");
   const renameModal = document.getElementById("rename-modal");
   const renameInput = document.getElementById("rename-input");
   const renameTitle = document.getElementById("rename-modal-title");
@@ -59,6 +63,7 @@
   const codePane = document.getElementById("code-pane");
   const codePaneLabel = document.getElementById("code-pane-label");
   const codePaneStatus = document.getElementById("code-pane-status");
+  const codePaneZoom = document.getElementById("code-pane-zoom");
   const codePaneClose = document.getElementById("code-pane-close");
   const codePaneBody = document.getElementById("code-pane-body");
   const codePlaceholder = document.getElementById("code-pane-placeholder");
@@ -541,8 +546,9 @@
     socket.addEventListener("open", () => {
       updatePaneStatus(pane, "open");
       if (pane.key === state.activeKey) {
+        sendActivate(pane);
         sendResize(pane);
-        focusTerminal();
+        if (state.activeContentPane === "terminal") focusTerminal();
       }
     });
     socket.addEventListener("message", (ev) => {
@@ -586,6 +592,7 @@
     state.activeKey = key;
     pane.el.classList.remove("hidden");
     touchPane(key, pane);
+    sendActivate(pane);
     requestAnimationFrame(() => pane.fitAddon.fit());
   }
 
@@ -666,6 +673,12 @@
     if (!pane || !pane.socket || pane.socket.readyState !== WebSocket.OPEN) return;
     const msg = JSON.stringify({ type: "resize", cols: pane.term.cols, rows: pane.term.rows });
     pane.socket.send(msg);
+  }
+
+  function sendActivate(pane) {
+    if (pane.key !== sessionKey(LOCAL_TERMINAL)) return;
+    if (!pane.socket || pane.socket.readyState !== WebSocket.OPEN) return;
+    pane.socket.send(JSON.stringify({ type: "activate" }));
   }
 
   // --- Code view: an optional VS Code (code serve-web) pane docked next to
@@ -754,6 +767,8 @@
     });
     window.tsessionCodeKeys.install(iframe, {
       onFocusTerminal: focusTerminal,
+      onToggleZoom: () => togglePaneZoom("code"),
+      onActivate: () => setActiveContentPane("code"),
       onError: (error) => reportFailure("code-view-keys-failed", cv.s, String(error)),
     });
     iframe.src = cv.path;
@@ -794,6 +809,8 @@
 
     codePane.classList.toggle("hidden", !showPane);
     codeResize.classList.toggle("hidden", !showPane);
+    if (!showPane && state.zoomedPane === "code") setPaneZoom(null);
+    if (!showPane && state.activeContentPane === "code") setActiveContentPane("terminal");
 
     if (showPane) {
       codePaneLabel.textContent = displayName(state.selectedSession);
@@ -813,6 +830,48 @@
     if (state.fitAddon) requestAnimationFrame(() => state.fitAddon.fit());
   }
 
+  function updateZoomControls() {
+    terminalPane.classList.toggle("code-active", state.activeContentPane === "code");
+    terminalPane.classList.toggle("pane-zoom-terminal", state.zoomedPane === "terminal");
+    terminalPane.classList.toggle("pane-zoom-code", state.zoomedPane === "code");
+
+    for (const [button, pane, label] of [
+      [terminalZoom, "terminal", "terminal"],
+      [codePaneZoom, "code", "code view"],
+    ]) {
+      const zoomed = state.zoomedPane === pane;
+      const action = zoomed ? "Unzoom" : "Zoom";
+      button.textContent = action;
+      button.setAttribute("aria-pressed", String(zoomed));
+      button.setAttribute("aria-label", action + " " + label);
+      button.title = action + " " + label + " (Alt+Z)";
+    }
+  }
+
+  function setActiveContentPane(pane) {
+    if (pane === "code" && codePane.classList.contains("hidden")) return;
+    state.activeContentPane = pane;
+    updateZoomControls();
+  }
+
+  function setPaneZoom(pane) {
+    if (pane === "code" && codePane.classList.contains("hidden")) pane = null;
+    state.zoomedPane = pane;
+    updateZoomControls();
+    requestAnimationFrame(() => {
+      const active = activePane();
+      if (active) active.fitAddon.fit();
+    });
+  }
+
+  function togglePaneZoom(pane = state.activeContentPane) {
+    if (pane === "terminal" && !state.selectedSession) return;
+    if (pane === "code" && codePane.classList.contains("hidden")) pane = "terminal";
+    const next = state.zoomedPane === pane ? null : pane;
+    setPaneZoom(next);
+    reportUserInteraction(next ? "pane-zoom" : "pane-unzoom", state.selectedSession, pane);
+  }
+
   // toggleCodeView is Alt+E's handler: it acts on the highlighted row,
   // selecting it first if it isn't already selected, then toggles that
   // session's code view — starting a code serve-web instance on first
@@ -827,15 +886,17 @@
     const cv = getOrCreateCodeView(s);
     if (cv.visible) {
       cv.visible = false;
+      setActiveContentPane("terminal");
       reportUserInteraction("code-view-hide", s);
       renderCodePane();
       return;
     }
 
     cv.visible = true;
+    renderCodePane();
+    setActiveContentPane("code");
     reportUserInteraction("code-view-show", s);
     if (cv.status === "running" || cv.status === "starting") {
-      renderCodePane();
       if (cv.status === "starting" && !cv.pollTimer) pollCodeStatus(cv);
       return;
     }
@@ -865,6 +926,7 @@
     stopPolling(cv);
     cv.visible = false;
     cv.status = "stopped";
+    setActiveContentPane("terminal");
     reportUserInteraction("code-view-close", s);
     if (cv.iframe) {
       cv.iframe.remove();
@@ -888,6 +950,8 @@
   // the browser/OS itself and cannot be intercepted from JavaScript.
 
   function focusTerminal() {
+    if (state.zoomedPane === "code") setPaneZoom(null);
+    setActiveContentPane("terminal");
     state.focusTarget = "terminal";
     state.sidebarOverlay = false;
     const pane = activePane();
@@ -1074,6 +1138,8 @@
           // only while the session list panel is focused (not while typing
           // into the terminal).
           toggleCodeView();
+        } else if (captureAction === "toggle-pane-zoom") {
+          togglePaneZoom();
         }
         return;
       }
@@ -1125,6 +1191,17 @@
   );
 
   terminalEl.addEventListener("click", focusTerminal);
+  terminalZoom.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    setActiveContentPane("terminal");
+    togglePaneZoom("terminal");
+  });
+  codePane.addEventListener("pointerdown", () => setActiveContentPane("code"));
+  codePaneZoom.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    setActiveContentPane("code");
+    togglePaneZoom("code");
+  });
 
   // Fitting is deliberately scoped to whichever pane is currently visible:
   // a hidden pane has zero layout size, so fitting it would compute a
@@ -1318,4 +1395,5 @@
   connectEvents();
   updateSidebarState();
   updateFocusIndicator();
+  updateZoomControls();
 })();

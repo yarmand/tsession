@@ -214,6 +214,10 @@ iframe never bubble to the parent document, so `static/codekeys.js` hooks the
 frame's own window (re-attached on every iframe `load`) in the **capture**
 phase and calls `focusTerminal()`, consuming the chord before VS Code sees it.
 
+`Alt+Z` and each pane's Zoom button zoom/unzoom the active terminal or code
+pane into all space not occupied by the session list. The code iframe bridge
+also captures `Alt+Z`, since iframe keydowns do not reach the parent document.
+
 **Row layout:** each row reads `glyph source location worktree repository
 age`. The **worktree** folder (`SessionView.Worktree`, i.e.
 `render.WorktreeName`) leads and never shrinks, because sessions on several
@@ -344,6 +348,11 @@ The browser attaches through the usual ephemeral grouped session
 — kills only that grouped session. **tsession never kills `tsession-local`**,
 which is what makes the shell and its scrollback survive closing the browser,
 `serve`, or the GUI.
+
+If `tsession new` or another command switches the local terminal's tmux
+client to a different session, reselecting the Local terminal row sends an
+`activate` control frame. The server identifies that exact client by the
+persistent PTY process PID and switches it back to the grouped local session.
 
 ### Code view (`Alt+E`)
 

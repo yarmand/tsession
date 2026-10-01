@@ -62,11 +62,39 @@ func TestBuildLocalKill_OnlyKillsTheGroupedSession(t *testing.T) {
 	if bin != "sh" || len(args) != 2 || args[0] != "-c" {
 		t.Fatalf("unexpected command shape: bin=%q args=%v", bin, args)
 	}
+
 	script := args[1]
 	if !strings.Contains(script, "tmux kill-session -t "+shQ(LocalWebSessionName())) {
 		t.Errorf("expected the grouped session to be killed:\n%s", script)
 	}
 	if strings.Contains(script, shQ(LocalSessionName)) {
 		t.Fatalf("teardown must never kill the persistent session %q:\n%s", LocalSessionName, script)
+	}
+}
+
+func TestBuildLocalRestore_SwitchesTheOwningClientBackToTheLocalGroup(t *testing.T) {
+	bin, args, err := BuildLocalRestore(4321)
+	if err != nil {
+		t.Fatalf("BuildLocalRestore: %v", err)
+	}
+	if bin != "sh" || len(args) != 2 || args[0] != "-c" {
+		t.Fatalf("unexpected command shape: bin=%q args=%v", bin, args)
+	}
+	for _, want := range []string{
+		"tmux list-clients",
+		"#{client_pid} #{client_tty}",
+		`[ "$pid" = 4321 ]`,
+		"tmux switch-client",
+		"-t " + shQ(LocalWebSessionName()),
+	} {
+		if !strings.Contains(args[1], want) {
+			t.Errorf("restore script missing %q:\n%s", want, args[1])
+		}
+	}
+}
+
+func TestBuildLocalRestore_RejectsInvalidPID(t *testing.T) {
+	if _, _, err := BuildLocalRestore(0); err == nil {
+		t.Fatal("expected an error for an invalid client PID")
 	}
 }

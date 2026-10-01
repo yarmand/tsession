@@ -21,7 +21,9 @@ import (
 // scrollback.
 //
 // The request carries no parameters: the command, the tmux target, and the
-// working directory are all fixed by the server.
+// working directory are all fixed by the server. An activate control frame
+// switches this PTY's exact tmux client back to its grouped local session in
+// case a command such as `tsession new` moved it elsewhere.
 func (s *Server) handleLocalTerminal(w http.ResponseWriter, r *http.Request) {
 	if s.registry == nil {
 		http.Error(w, "terminal support not configured", http.StatusNotImplemented)
@@ -35,12 +37,24 @@ func (s *Server) handleLocalTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.bridgeTerminal(w, r, term)
+	s.bridgeTerminal(w, r, term, func() {
+		if err := s.localRestoreFn(term.ProcessPID()); err != nil {
+			s.logInteraction("local-terminal-restore-failed", attachcmd.LocalTerminalID, "", "Local terminal", err.Error(), "error")
+		}
+	})
 }
 
 type localTerminalError struct {
 	msg string
 	err error
+}
+
+func restoreLocalTerminal(clientPID int) error {
+	bin, args, err := attachcmd.BuildLocalRestore(clientPID)
+	if err != nil {
+		return err
+	}
+	return exec.Command(bin, args...).Run()
 }
 
 func (e *localTerminalError) Error() string { return e.msg + ": " + e.err.Error() }

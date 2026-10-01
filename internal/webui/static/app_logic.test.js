@@ -57,6 +57,20 @@ test("captureKeyAction prioritizes Alt+T from either panel before terminal typin
   );
 });
 
+test("captureKeyAction handles Alt+Z from either panel", () => {
+  const altZ = {
+    altKey: true,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    code: "KeyZ",
+  };
+
+  assert.equal(captureKeyAction(altZ, "terminal"), "toggle-pane-zoom");
+  assert.equal(captureKeyAction(altZ, "list"), "toggle-pane-zoom");
+  assert.equal(captureKeyAction({ ...altZ, shiftKey: true }, "terminal"), "");
+});
+
 test("terminalSocketPath reserves /api/localterm for the pseudo-row only", () => {
   assert.equal(terminalSocketPath(LOCAL_TERMINAL), "/api/localterm");
   assert.equal(

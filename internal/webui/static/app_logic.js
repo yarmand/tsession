@@ -42,6 +42,7 @@
       return focusTarget === "terminal" ? "focus-list" : "focus-terminal";
     }
     if (isPlainAltChord(ev, "KeyT")) return "open-local-terminal";
+    if (isPlainAltChord(ev, "KeyZ")) return "toggle-pane-zoom";
     if (isPlainAltChord(ev, "KeyE") && focusTarget === "list") {
       return "toggle-code-view";
     }

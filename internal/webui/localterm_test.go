@@ -106,6 +106,44 @@ func TestHandleLocalTerminal_ReconnectReusesSamePTY(t *testing.T) {
 	}
 }
 
+func TestHandleLocalTerminal_ActivateRestoresOwningTmuxClient(t *testing.T) {
+	registry := webterm.NewRegistry()
+	t.Cleanup(func() { _ = registry.Shutdown() })
+
+	srv := NewServer(
+		func() ([]sessions.Session, error) { return nil, nil },
+		WithTerminal(registry),
+	)
+
+	key := webterm.Key{Origin: "", ID: attachcmd.LocalTerminalID}
+	term, err := registry.Attach(key, webterm.Spec{Bin: "sh", Args: []string{"-c", "cat"}})
+	if err != nil {
+		t.Fatalf("pre-attach: %v", err)
+	}
+
+	restored := make(chan int, 1)
+	srv.SetLocalTerminalRestore(func(pid int) error {
+		restored <- pid
+		return nil
+	})
+
+	conn := dialTerminal(t, srv, "/api/localterm")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"activate"}`)); err != nil {
+		t.Fatalf("write activate: %v", err)
+	}
+
+	select {
+	case pid := <-restored:
+		if pid != term.ProcessPID() {
+			t.Fatalf("restore PID = %d, want %d", pid, term.ProcessPID())
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for local terminal restore")
+	}
+}
+
 func TestHandleLocalTerminal_HomeDirFailureIsReportedAndLogged(t *testing.T) {
 	registry := webterm.NewRegistry()
 	t.Cleanup(func() { _ = registry.Shutdown() })

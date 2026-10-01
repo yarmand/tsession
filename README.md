@@ -88,10 +88,12 @@ Useful controls:
 | `Alt+/` | Toggle focus between the session list and terminal; from the code pane, move focus to the terminal |
 | `Alt+H` | Collapse or restore the session list |
 | `Alt+E` | Toggle a VS Code (`code serve-web`) pane for the highlighted session |
+| `Alt+Z` | Zoom or unzoom the active terminal or code pane into all space beside the session list |
 | `↑` / `↓` | Move through the focused session list |
 | `Enter` | Open the highlighted session |
 | `F2` | Rename the selected session |
 | Top-left button | Collapse or restore the session list |
+| Pane Zoom button | Zoom or unzoom that terminal or code pane |
 | Drag the list edge | Resize the session list; the width is remembered |
 | Drag the code pane edge | Resize the code pane; the width is remembered |
 
@@ -99,6 +101,11 @@ When the list is collapsed, `Alt+/` opens it as an overlay without resizing
 the terminal. Selecting a session closes the overlay automatically. Remote
 origins receive distinct colors so sessions from different hosts remain easy
 to identify.
+
+The pinned Local terminal remains anchored to its dedicated shell. If a
+command such as `tsession new` switches its tmux client to a new session,
+selecting Local terminal again restores the original local shell and
+scrollback.
 
 `Alt+E` (with the session list focused) opens a code editor pane docked to
 the right of the terminal, backed by a `code serve-web` instance scoped to

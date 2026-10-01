@@ -21,7 +21,7 @@ const localOriginSegment = "local"
 // terminalControlMessage is a JSON control frame sent by the client over a
 // WebSocket text message. Client keystrokes are sent as binary messages
 // instead (see handleTerminal), so this type only ever carries out-of-band
-// instructions like resize.
+// instructions like resize and local-terminal activation.
 type terminalControlMessage struct {
 	Type string `json:"type"`
 	Rows uint16 `json:"rows"`
@@ -107,16 +107,17 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.bridgeTerminal(w, r, term)
+	s.bridgeTerminal(w, r, term, nil)
 }
 
 // bridgeTerminal upgrades the request to a WebSocket and pumps bytes
 // between it and term for the life of the connection: PTY output is sent as
 // binary messages, client keystrokes arrive as binary messages, and JSON
-// text messages carry out-of-band control instructions (resize). Returning
-// only ends this one connection — the PTY itself outlives it, so closing a
-// browser tab merely unsubscribes.
-func (s *Server) bridgeTerminal(w http.ResponseWriter, r *http.Request, term *webterm.Terminal) {
+// text messages carry out-of-band control instructions (resize and, for the
+// dedicated local terminal, activation). Returning only ends this one
+// connection — the PTY itself outlives it, so closing a browser tab merely
+// unsubscribes.
+func (s *Server) bridgeTerminal(w http.ResponseWriter, r *http.Request, term *webterm.Terminal, onActivate func()) {
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		// Accept has already written an error response.
@@ -146,6 +147,8 @@ func (s *Server) bridgeTerminal(w http.ResponseWriter, r *http.Request, term *we
 			}
 			if msg.Type == "resize" && msg.Rows > 0 && msg.Cols > 0 {
 				_ = term.Resize(msg.Rows, msg.Cols)
+			} else if msg.Type == "activate" && onActivate != nil {
+				onActivate()
 			}
 		}
 	}

@@ -294,6 +294,16 @@ func (t *Terminal) Write(p []byte) (int, error) {
 	return t.ptmx.Write(p)
 }
 
+// ProcessPID returns the PID of the command attached to the PTY. Callers
+// can use it to identify that exact long-lived client in an external
+// process registry, such as tmux's client list.
+func (t *Terminal) ProcessPID() int {
+	if t.cmd.Process == nil {
+		return 0
+	}
+	return t.cmd.Process.Pid
+}
+
 // Resize sets the PTY's window size.
 func (t *Terminal) Resize(rows, cols uint16) error {
 	return pty.Setsize(t.ptmx, &pty.Winsize{Rows: rows, Cols: cols})

@@ -2,6 +2,7 @@ package attachcmd
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/yarma/tsession/internal/shellutil"
 )
@@ -57,4 +58,24 @@ func BuildLocal(home string) (string, []string, error) {
 func BuildLocalKill() (string, []string) {
 	script := "tmux kill-session -t " + shellutil.Quote(LocalWebSessionName())
 	return "sh", []string{"-c", script}
+}
+
+// BuildLocalRestore returns a command that finds the tmux client running in
+// the local terminal's persistent PTY and switches it back to the grouped
+// local session. Commands such as `tsession new` may switch that client to a
+// newly-created session; the PTY itself remains alive, so reselecting the
+// local terminal must explicitly restore its original target.
+func BuildLocalRestore(clientPID int) (string, []string, error) {
+	if clientPID <= 0 {
+		return "", nil, errors.New("attachcmd: invalid local terminal client PID")
+	}
+
+	pid := strconv.Itoa(clientPID)
+	target := shellutil.Quote(LocalWebSessionName())
+	script := "client=$(tmux list-clients -F '#{client_pid} #{client_tty}' | " +
+		"while read -r pid tty; do " +
+		"if [ \"$pid\" = " + pid + " ]; then printf '%s\\n' \"$tty\"; break; fi; " +
+		"done); " +
+		"[ -n \"$client\" ] && exec tmux switch-client -c \"$client\" -t " + target
+	return "sh", []string{"-c", script}, nil
 }

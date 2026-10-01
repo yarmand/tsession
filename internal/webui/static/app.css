@@ -291,6 +291,50 @@ body.resizing-sidebar {
   background: #000;
 }
 
+.pane-zoom-button {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #252525;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.pane-zoom-button:hover {
+  background: #333;
+}
+
+#terminal-zoom {
+  position: absolute;
+  z-index: 4;
+  top: 4px;
+  right: 6px;
+}
+
+#terminal-pane.code-active:not(.pane-zoom-terminal) #terminal-zoom {
+  display: none;
+}
+
+#terminal-pane.pane-zoom-terminal #code-resize,
+#terminal-pane.pane-zoom-terminal #code-pane {
+  display: none;
+}
+
+#terminal-pane.pane-zoom-code #terminal-wrap,
+#terminal-pane.pane-zoom-code #code-resize {
+  display: none;
+}
+
+#terminal-pane.pane-zoom-code #code-pane {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  border-left: 0;
+}
+
 #terminal {
   flex: 1;
   min-height: 0;
@@ -406,7 +450,8 @@ body.resizing-code {
   color: var(--fg);
 }
 
-#code-pane-close {
+#code-pane-close,
+#code-pane-zoom {
   background: none;
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -416,7 +461,8 @@ body.resizing-code {
   padding: 1px 7px;
 }
 
-#code-pane-close:hover {
+#code-pane-close:hover,
+#code-pane-zoom:hover {
   background: #333;
 }
 

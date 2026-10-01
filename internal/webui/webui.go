@@ -51,12 +51,13 @@ func defaultNotifyStorePath() string {
 
 // Server holds the dependencies for the web UI's HTTP handlers.
 type Server struct {
-	sessionsFn SessionsProvider
-	aliasesFn  AliasesProvider
-	remoteFn   RemoteResolver
-	registry   *webterm.Registry
-	homeDirFn  func() (string, error)
-	now        func() time.Time
+	sessionsFn     SessionsProvider
+	aliasesFn      AliasesProvider
+	remoteFn       RemoteResolver
+	registry       *webterm.Registry
+	homeDirFn      func() (string, error)
+	localRestoreFn func(int) error
+	now            func() time.Time
 
 	sessionCache *sessionCache
 
@@ -115,6 +116,7 @@ func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
 		aliasesFn:       func() (map[string]string, error) { return nil, nil },
 		now:             time.Now,
 		homeDirFn:       os.UserHomeDir,
+		localRestoreFn:  restoreLocalTerminal,
 		notifyStorePath: defaultNotifyStorePath(),
 		pollInterval:    3 * time.Second,
 		codeDataDir:     defaultCodeDataDir(),
@@ -163,6 +165,13 @@ func (s *Server) SetDebugLog(fn func(format string, args ...any)) {
 // os.UserHomeDir default.
 func (s *Server) SetLocalTerminalHome(fn func() (string, error)) {
 	s.homeDirFn = fn
+}
+
+// SetLocalTerminalRestore overrides how the dedicated local terminal's tmux
+// client is restored when the browser reselects it. Tests use this to avoid
+// requiring a live tmux server.
+func (s *Server) SetLocalTerminalRestore(fn func(int) error) {
+	s.localRestoreFn = fn
 }
 
 // Handler returns an http.Handler serving this Server's API routes, mounted

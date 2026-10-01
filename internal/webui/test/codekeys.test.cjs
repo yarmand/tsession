@@ -39,10 +39,23 @@ function setup() {
   const win = target();
   frame.contentWindow = win;
   let calls = 0;
+  let zoomCalls = 0;
+  let activateCalls = 0;
   const errors = [];
-  keys.install(frame, { onFocusTerminal: () => { calls++; }, onError: (e) => errors.push(e) });
+  keys.install(frame, {
+    onFocusTerminal: () => { calls++; },
+    onToggleZoom: () => { zoomCalls++; },
+    onActivate: () => { activateCalls++; },
+    onError: (e) => errors.push(e),
+  });
   frame.fire("load", {});
-  return { win, calls: () => calls, errors };
+  return {
+    win,
+    calls: () => calls,
+    zoomCalls: () => zoomCalls,
+    activateCalls: () => activateCalls,
+    errors,
+  };
 }
 
 test("Alt+/ inside the VS Code frame moves focus to the terminal", () => {
@@ -61,6 +74,23 @@ test("listener runs in the capture phase so VS Code cannot swallow it first", ()
   assert.equal(l.capture, true);
 });
 
+test("Alt+Z inside the VS Code frame zooms the code pane", () => {
+  const { win, zoomCalls, activateCalls } = setup();
+  const ev = keyEvent({ altKey: true, code: "KeyZ", key: "Ω" });
+  win.fire("keydown", ev);
+  assert.equal(zoomCalls(), 1);
+  assert.equal(activateCalls(), 1);
+  assert.ok(ev.prevented, "VS Code must not also receive the chord");
+  assert.ok(ev.stopped);
+});
+
+test("focus and pointer activity mark the code pane active", () => {
+  const { win, activateCalls } = setup();
+  win.fire("focus", {});
+  win.fire("pointerdown", {});
+  assert.equal(activateCalls(), 2);
+});
+
 test("other keys and modified Slash chords pass through to VS Code untouched", () => {
   const { win, calls } = setup();
   for (const f of [
@@ -69,6 +99,7 @@ test("other keys and modified Slash chords pass through to VS Code untouched", (
     { altKey: true, metaKey: true, code: "Slash" },
     { altKey: true, ctrlKey: true, code: "Slash" },
     { altKey: true, code: "KeyE" },
+    { altKey: true, shiftKey: true, code: "KeyZ" },
   ]) {
     const ev = keyEvent(f);
     win.fire("keydown", ev);

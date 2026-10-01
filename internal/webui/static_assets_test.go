@@ -84,11 +84,30 @@ func TestStaticAssets_TerminalResizeSendsUpdatedDimensions(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /app.js: status = %d", rec.Code)
 	}
+
 	if !strings.Contains(rec.Body.String(), "term.onResize(() => {") {
 		t.Fatal("app.js does not forward xterm resize events to the terminal WebSocket")
 	}
 	if !strings.Contains(rec.Body.String(), `JSON.stringify({ type: "resize", cols: pane.term.cols, rows: pane.term.rows })`) {
 		t.Fatal("app.js does not send xterm's current rows and columns in the resize control frame")
+	}
+}
+
+func TestStaticAssets_LocalTerminalReselectSendsActivate(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+	req := httptest.NewRequest(http.MethodGet, "/app.js", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		"function sendActivate(pane)",
+		`pane.key !== sessionKey(LOCAL_TERMINAL)`,
+		`JSON.stringify({ type: "activate" })`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("app.js missing %q", want)
+		}
 	}
 }
 
@@ -234,6 +253,45 @@ func TestStaticAssets_CodeViewAltEBehaviourPresent(t *testing.T) {
 	srv.Handler().ServeHTTP(logicRec, logicReq)
 	if !strings.Contains(logicRec.Body.String(), `isPlainAltChord(ev, "KeyE")`) {
 		t.Fatal("app_logic.js does not define the Alt+E capture-phase chord")
+	}
+}
+
+func TestStaticAssets_ActivePaneCanZoom(t *testing.T) {
+	srv := NewServer(func() ([]sessions.Session, error) { return nil, nil })
+
+	body := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d", path, rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	for _, want := range []string{`id="terminal-zoom"`, `id="code-pane-zoom"`, "Alt+Z zoom"} {
+		if !strings.Contains(body("/"), want) {
+			t.Errorf("index.html missing %q", want)
+		}
+	}
+	for _, want := range []string{"function togglePaneZoom", `"pane-zoom-terminal"`, `"pane-zoom-code"`} {
+		if !strings.Contains(body("/app.js"), want) {
+			t.Errorf("app.js missing %q", want)
+		}
+	}
+	for _, want := range []string{"#terminal-pane.pane-zoom-terminal", "#terminal-pane.pane-zoom-code"} {
+		if !strings.Contains(body("/app.css"), want) {
+			t.Errorf("app.css missing %q", want)
+		}
+	}
+	if !strings.Contains(body("/app_logic.js"), `isPlainAltChord(ev, "KeyZ")`) {
+		t.Error("app_logic.js does not define the Alt+Z chord")
+	}
+	if !strings.Contains(body("/codekeys.js"), `ev.code === "KeyZ"`) {
+		t.Error("codekeys.js does not forward Alt+Z from the code iframe")
+	}
+	if !strings.Contains(body("/sw.js"), `tsession-shell-v19`) {
+		t.Error("service worker cache was not bumped for changed static assets")
 	}
 }
 
@@ -425,7 +483,7 @@ func TestStaticAssets_ServiceWorkerCacheVersionIsCurrent(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `const CACHE_NAME = "tsession-shell-v17";`) {
+	if !strings.Contains(body, `const CACHE_NAME = "tsession-shell-v19";`) {
 		t.Fatal("sw.js CACHE_NAME was not bumped for this change")
 	}
 	if !strings.Contains(body, `"/app_logic.js"`) {

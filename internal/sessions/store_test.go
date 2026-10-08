@@ -49,3 +49,14 @@ func TestLoadRecent_FiltersByAgeAndOrders(t *testing.T) {
 		t.Fatalf("fields not loaded: %+v", got[0])
 	}
 }
+
+func TestLoadRecent_MissingDBReturnsNil(t *testing.T) {
+	nonExistentPath := filepath.Join(t.TempDir(), "nonexistent.db")
+	got, err := LoadRecent(nonExistentPath, 14*24*time.Hour)
+	if err != nil {
+		t.Fatalf("expected nil error for missing db, got: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil sessions, got: %+v", got)
+	}
+}

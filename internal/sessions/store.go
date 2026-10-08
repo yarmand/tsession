@@ -3,12 +3,19 @@ package sessions
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 func LoadRecent(dbPath string, maxAge time.Duration) ([]Session, error) {
+	if _, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro")
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", dbPath, err)

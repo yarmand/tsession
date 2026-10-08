@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -32,6 +33,67 @@ func validateNewArgs(branch, path string) error {
 		return fmt.Errorf("provide either a branch or --path, not both")
 	}
 	return nil
+}
+
+// extractCommandBinary extracts the initial executable or binary name from
+// a shell command string, ignoring any leading environment variable assignments (e.g. VAR=val).
+func extractCommandBinary(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	for len(cmd) > 0 {
+		eq := strings.Index(cmd, "=")
+		sp := strings.IndexAny(cmd, " \t")
+		if eq > 0 && (sp == -1 || eq < sp) {
+			if sp == -1 {
+				return ""
+			}
+			cmd = strings.TrimSpace(cmd[sp:])
+			continue
+		}
+		if sp == -1 {
+			return cmd
+		}
+		return cmd[:sp]
+	}
+	return ""
+}
+
+// checkAgentCommand verifies that the agent command's executable is available in PATH
+// or via the user's interactive login shell.
+func checkAgentCommand(cmd string) error {
+	bin := extractCommandBinary(cmd)
+	if bin == "" {
+		return fmt.Errorf("agent command is empty")
+	}
+	// Fast path: standard LookPath resolution.
+	if _, err := exec.LookPath(bin); err == nil {
+		return nil
+	}
+	// Fallback: check inside the user's interactive login shell in case PATH
+	// is configured in ~/.bashrc, ~/.zshrc, etc.
+	userShell := os.Getenv("SHELL")
+	if userShell == "" {
+		userShell = "/bin/sh"
+	}
+	shellBase := filepath.Base(userShell)
+	var flag string
+	switch shellBase {
+	case "csh", "tcsh":
+		flag = "-ic"
+	default:
+		flag = "-lic"
+	}
+	c := exec.Command(userShell, flag, "type "+shellQuote(bin))
+	if err := c.Run(); err == nil {
+		return nil
+	}
+	return fmt.Errorf("agent command %q not found in PATH", bin)
+}
+
+// wrapAgentCommand wraps the agent command so that if it fails or exits with a
+// non-zero status inside tmux, tmux keeps the pane open in an interactive shell
+// rather than abruptly closing and leaving the user with no error message.
+func wrapAgentCommand(cmd string) string {
+	return fmt.Sprintf("( %s ) || { rc=$?; echo; echo \"Command failed with exit status $rc\"; exec ${SHELL:-/bin/sh}; }", cmd)
 }
 
 // buildAgentCommand builds the shell command run inside the tmux session. base
@@ -129,9 +191,13 @@ func New(args []string) error {
 	vlogf(logw, "new: session name=%q resume=%t\n", resolved, resume)
 
 	if !resume {
+		if err := checkAgentCommand(agentBase); err != nil {
+			return err
+		}
 		agentCmd := buildAgentCommand(agentBase, copilotArgs)
+		wrappedCmd := wrapAgentCommand(agentCmd)
 		vlogf(logw, "new: starting command in session: %s\n", agentCmd)
-		if err := tmux.NewSessionVerbose(resolved, wtPath, agentCmd, logw); err != nil {
+		if err := tmux.NewSessionVerbose(resolved, wtPath, wrappedCmd, logw); err != nil {
 			return fmt.Errorf("create tmux session: %w", err)
 		}
 		vlogf(logw, "new: note: the started command runs inside tmux; its own output is not captured here. Attach to session %q to see it.\n", resolved)

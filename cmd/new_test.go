@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -93,3 +94,44 @@ func TestBuildAgentCommand(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestExtractCommandBinary(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want string
+	}{
+		{"copilot", "copilot"},
+		{"copilot --resume", "copilot"},
+		{"agency copilot --hub", "agency"},
+		{"FOO=bar copilot", "copilot"},
+		{"A=1 B=2 pi --foo", "pi"},
+		{"/usr/local/bin/pi", "/usr/local/bin/pi"},
+		{"", ""},
+		{"A=1", ""},
+	}
+	for _, tc := range cases {
+		if got := extractCommandBinary(tc.cmd); got != tc.want {
+			t.Errorf("extractCommandBinary(%q) = %q, want %q", tc.cmd, got, tc.want)
+		}
+	}
+}
+
+func TestWrapAgentCommand(t *testing.T) {
+	wrapped := wrapAgentCommand("copilot --resume")
+	if !strings.Contains(wrapped, "copilot --resume") {
+		t.Errorf("wrapped command missing original command: %s", wrapped)
+	}
+	if !strings.Contains(wrapped, "Command failed with exit status") {
+		t.Errorf("wrapped command missing failure prompt: %s", wrapped)
+	}
+}
+
+func TestCheckAgentCommand(t *testing.T) {
+	if err := checkAgentCommand("ls"); err != nil {
+		t.Errorf("expected ls to be found, got %v", err)
+	}
+	if err := checkAgentCommand("nonexistent_command_12345"); err == nil {
+		t.Errorf("expected nonexistent command to fail, got nil")
+	}
+}
+

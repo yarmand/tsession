@@ -290,7 +290,7 @@ func TestStaticAssets_ActivePaneCanZoom(t *testing.T) {
 	if !strings.Contains(body("/codekeys.js"), `ev.code === "KeyZ"`) {
 		t.Error("codekeys.js does not forward Alt+Z from the code iframe")
 	}
-	if !strings.Contains(body("/sw.js"), `tsession-shell-v19`) {
+	if !strings.Contains(body("/sw.js"), `tsession-shell-v20`) {
 		t.Error("service worker cache was not bumped for changed static assets")
 	}
 }
@@ -483,7 +483,7 @@ func TestStaticAssets_ServiceWorkerCacheVersionIsCurrent(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	body := rec.Body.String()
-	if !strings.Contains(body, `const CACHE_NAME = "tsession-shell-v19";`) {
+	if !strings.Contains(body, `const CACHE_NAME = "tsession-shell-v20";`) {
 		t.Fatal("sw.js CACHE_NAME was not bumped for this change")
 	}
 	if !strings.Contains(body, `"/app_logic.js"`) {

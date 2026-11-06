@@ -502,6 +502,15 @@
     // user is sending to the terminal.
     term.attachCustomKeyEventHandler((ev) => {
       if (ev.type === "keydown") {
+        if (ev.key === "Enter" && ev.shiftKey && !ev.ctrlKey && !ev.altKey &&
+            !ev.metaKey && !ev.isComposing) {
+          // xterm encodes Shift+Enter as CR, which submits in Copilot.
+          // Send LF instead, matching the working Ctrl+J newline chord.
+          ev.preventDefault();
+          ev.stopPropagation();
+          term.input("\n");
+          return false;
+        }
         const seq = altEscapeSequence(ev);
         if (seq !== null) {
           // Send the escape sequence ourselves and prevent the browser's

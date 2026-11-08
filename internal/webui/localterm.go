@@ -91,7 +91,7 @@ func (s *Server) ensureLocalTerminal(key webterm.Key) (*webterm.Terminal, *local
 	}
 
 	term, err := s.registry.Attach(key, webterm.Spec{
-		Bin: bin, Args: args, Rows: 24, Cols: 80, Teardown: teardown,
+		Bin: bin, Args: args, Dir: home, Rows: 24, Cols: 80, Teardown: teardown,
 	})
 	if err != nil {
 		return nil, &localTerminalError{msg: "cannot start the local terminal", err: err}

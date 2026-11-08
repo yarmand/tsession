@@ -85,6 +85,51 @@ func TestBuild_LocalWithTmuxName_UsesGroupedAttach(t *testing.T) {
 	}
 }
 
+func TestBuild_LocalWithTarget_IncludesCWD(t *testing.T) {
+	s := sessions.Session{
+		ID:         "sess1",
+		CWD:        "/Users/someone/repo",
+		TmuxName:   "proj",
+		TmuxTarget: "proj:2.1",
+	}
+	_, args, err := Build(s, config.Remote{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	script := args[1]
+	web := WebSessionName("", "sess1")
+	for _, want := range []string{
+		"tmux new-session -d -s " + shQ(web) + " -t " + shQ("proj") + " -c " + shQ("/Users/someone/repo"),
+		"exec tmux attach-session -c " + shQ("/Users/someone/repo") + " -t " + shQ(web),
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestBuild_LocalWithTmuxName_IncludesCWD(t *testing.T) {
+	s := sessions.Session{
+		ID:       "sess1",
+		CWD:      "/Users/someone/repo",
+		TmuxName: "proj",
+	}
+	_, args, err := Build(s, config.Remote{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	script := args[1]
+	web := WebSessionName("", "sess1")
+	for _, want := range []string{
+		"tmux new-session -d -s " + shQ(web) + " -t " + shQ("proj") + " -c " + shQ("/Users/someone/repo"),
+		"exec tmux attach-session -c " + shQ("/Users/someone/repo") + " -t " + shQ(web),
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q:\n%s", want, script)
+		}
+	}
+}
+
 func TestBuild_LocalNoTarget_Copilot(t *testing.T) {
 	s := sessions.Session{ID: "sess2", Source: "copilot"}
 	_, args, err := Build(s, config.Remote{})
@@ -106,6 +151,28 @@ func TestBuild_LocalNoTarget_Copilot(t *testing.T) {
 	}
 	if strings.Contains(script, " -t 'proj'") {
 		t.Errorf("no-target script must not reference a group target:\n%s", script)
+	}
+}
+
+func TestBuild_LocalNoTarget_IncludesCWD(t *testing.T) {
+	s := sessions.Session{
+		ID:     "sess2",
+		CWD:    "/Users/someone/repo",
+		Source: "copilot",
+	}
+	_, args, err := Build(s, config.Remote{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	script := args[1]
+	web := WebSessionName("", "sess2")
+	for _, want := range []string{
+		"tmux new-session -d -s " + shQ(web) + " -c " + shQ("/Users/someone/repo"),
+		"exec tmux attach-session -c " + shQ("/Users/someone/repo") + " -t " + shQ(web),
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q:\n%s", want, script)
+		}
 	}
 }
 
@@ -220,6 +287,79 @@ func TestBuild_RemoteSSH_NoTmuxAtAll_DirectResume(t *testing.T) {
 	}
 	if !strings.Contains(last, `exec "$copilot_bin" --resume=`) {
 		t.Errorf("expected direct resume command, got:\n%s", last)
+	}
+}
+
+func TestBuild_RemoteSSH_WithTarget_IncludesCWD(t *testing.T) {
+	s := sessions.Session{
+		ID:                  "rsess1",
+		Origin:              "myhost",
+		CWD:                 "/home/ubuntu/repo",
+		RemoteTmuxAvailable: true,
+		RemoteTmuxTarget:    "work:0.0",
+	}
+	r := config.Remote{Name: "myhost", Type: "ssh", Host: "myhost.example.com"}
+	_, args, err := Build(s, r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	last := args[len(args)-1]
+	web := WebSessionName("myhost", "rsess1")
+	for _, want := range []string{
+		web,
+		"-t",
+		"work",
+		"-c",
+		"/home/ubuntu/repo",
+		"attach-session",
+	} {
+		if !strings.Contains(last, want) {
+			t.Errorf("remote script missing %q:\n%s", want, last)
+		}
+	}
+}
+
+func TestBuild_RemoteSSH_NoTarget_IncludesCWD(t *testing.T) {
+	s := sessions.Session{
+		ID:                  "rsess2",
+		Origin:              "myhost",
+		CWD:                 "/home/ubuntu/repo",
+		RemoteTmuxAvailable: true,
+	}
+	r := config.Remote{Name: "myhost", Type: "ssh", Host: "myhost.example.com"}
+	_, args, err := Build(s, r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	last := args[len(args)-1]
+	web := WebSessionName("myhost", "rsess2")
+	for _, want := range []string{
+		web,
+		"-c",
+		"/home/ubuntu/repo",
+		"attach-session",
+	} {
+		if !strings.Contains(last, want) {
+			t.Errorf("remote script missing %q:\n%s", want, last)
+		}
+	}
+}
+
+func TestBuild_RemoteSSH_NoTmuxAtAll_IncludesCWD(t *testing.T) {
+	s := sessions.Session{
+		ID:                  "rsess3",
+		Origin:              "myhost",
+		CWD:                 "/home/ubuntu/repo",
+		RemoteTmuxAvailable: false,
+	}
+	r := config.Remote{Name: "myhost", Type: "ssh", Host: "myhost.example.com"}
+	_, args, err := Build(s, r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	last := args[len(args)-1]
+	if !strings.Contains(last, "cd") || !strings.Contains(last, "/home/ubuntu/repo") {
+		t.Errorf("expected cd to remote cwd, got:\n%s", last)
 	}
 }
 

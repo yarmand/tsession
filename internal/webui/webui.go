@@ -55,9 +55,10 @@ type Server struct {
 	aliasesFn      AliasesProvider
 	remoteFn       RemoteResolver
 	registry       *webterm.Registry
-	homeDirFn      func() (string, error)
-	localRestoreFn func(int) error
-	now            func() time.Time
+	homeDirFn         func() (string, error)
+	localRestoreFn    func(int) error
+	sessionActivateFn func(string, string) error
+	now               func() time.Time
 
 	sessionCache *sessionCache
 
@@ -112,11 +113,12 @@ func WithExternalOpener(open func(string) error) Option {
 // NewServer builds a Server from a SessionsProvider and optional Options.
 func NewServer(sessionsFn SessionsProvider, opts ...Option) *Server {
 	s := &Server{
-		sessionsFn:      sessionsFn,
-		aliasesFn:       func() (map[string]string, error) { return nil, nil },
-		now:             time.Now,
-		homeDirFn:       os.UserHomeDir,
-		localRestoreFn:  restoreLocalTerminal,
+		sessionsFn:        sessionsFn,
+		aliasesFn:         func() (map[string]string, error) { return nil, nil },
+		now:               time.Now,
+		homeDirFn:         os.UserHomeDir,
+		localRestoreFn:    restoreLocalTerminal,
+		sessionActivateFn: defaultSessionActivate,
 		notifyStorePath: defaultNotifyStorePath(),
 		pollInterval:    3 * time.Second,
 		codeDataDir:     defaultCodeDataDir(),
@@ -172,6 +174,13 @@ func (s *Server) SetLocalTerminalHome(fn func() (string, error)) {
 // requiring a live tmux server.
 func (s *Server) SetLocalTerminalRestore(fn func(int) error) {
 	s.localRestoreFn = fn
+}
+
+// SetSessionActivate overrides how a local session's working directory is
+// updated when the browser activates or switches to it. Tests use this to
+// avoid requiring a live tmux server.
+func (s *Server) SetSessionActivate(fn func(web, cwd string) error) {
+	s.sessionActivateFn = fn
 }
 
 // Handler returns an http.Handler serving this Server's API routes, mounted

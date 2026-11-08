@@ -81,17 +81,17 @@ func buildScript(s sessions.Session) (string, error) {
 
 	if s.Origin == "" {
 		if s.TmuxTarget != "" {
-			return groupedAttachScript(web, s.TmuxTarget)
+			return groupedAttachScript(web, s.TmuxTarget, s.CWD)
 		}
 		if s.TmuxName != "" {
-			return groupedAttachScript(web, s.TmuxName)
+			return groupedAttachScript(web, s.TmuxName, s.CWD)
 		}
-		return newSessionAndAttachScript(web, localResumeCommand(s)), nil
+		return newSessionAndAttachScript(web, localResumeCommand(s), s.CWD), nil
 	}
 
 	if s.RemoteTmuxAvailable {
 		if s.RemoteTmuxTarget != "" {
-			return groupedAttachScript(web, s.RemoteTmuxTarget)
+			return groupedAttachScript(web, s.RemoteTmuxTarget, s.CWD)
 		}
 		return remoteNoTargetScript(web, s), nil
 	}
@@ -107,21 +107,32 @@ func buildScript(s sessions.Session) (string, error) {
 // "session:window.pane" form (as produced by tmux.Pane.Target()). A
 // session-only target is also accepted when discovery found the tmux session
 // by working directory but could not resolve the owning process to a pane.
+// When cwd is non-empty, both the created grouped session and the attached
+// client are set to that working directory so newly-opened panes and windows
+// inherit the agent session's working directory.
 //
 // tmux new-session -A is deliberately not used here: it *attaches* when the
 // session already exists (ignoring -d), so it cannot serve as an "ensure a
 // detached session exists" primitive. has-session/new-session is the
 // deterministic form.
-func groupedAttachScript(web, target string) (string, error) {
+func groupedAttachScript(web, target, cwd string) (string, error) {
 	if target == "" {
 		return "", fmt.Errorf("attachcmd: empty tmux target")
 	}
 
 	webQ := shellutil.Quote(web)
+	cFlag := ""
+	attachCFlag := ""
+	if cwd != "" {
+		cwdQ := shellutil.Quote(cwd)
+		cFlag = " -c " + cwdQ
+		attachCFlag = " -c " + cwdQ
+	}
+
 	if !strings.Contains(target, ":") {
 		origQ := shellutil.Quote(target)
-		return "tmux has-session -t " + webQ + " 2>/dev/null || tmux new-session -d -s " + webQ + " -t " + origQ + "; " +
-			"exec tmux attach-session -t " + webQ, nil
+		return "tmux has-session -t " + webQ + " 2>/dev/null || tmux new-session -d -s " + webQ + " -t " + origQ + cFlag + "; " +
+			"exec tmux attach-session" + attachCFlag + " -t " + webQ, nil
 	}
 
 	origSession, windowPane, ok := splitTarget(target)
@@ -137,10 +148,10 @@ func groupedAttachScript(web, target string) (string, error) {
 	winTargetQ := shellutil.Quote(web + ":" + window)
 	paneTargetQ := shellutil.Quote(web + ":" + window + "." + pane)
 
-	return "tmux has-session -t " + webQ + " 2>/dev/null || tmux new-session -d -s " + webQ + " -t " + origQ + "; " +
+	return "tmux has-session -t " + webQ + " 2>/dev/null || tmux new-session -d -s " + webQ + " -t " + origQ + cFlag + "; " +
 		"tmux select-window -t " + winTargetQ + "; " +
 		"tmux select-pane -t " + paneTargetQ + "; " +
-		"exec tmux attach-session -t " + webQ, nil
+		"exec tmux attach-session" + attachCFlag + " -t " + webQ, nil
 }
 
 // newSessionAndAttachScript builds the script for a session with no existing
@@ -148,11 +159,18 @@ func groupedAttachScript(web, target string) (string, error) {
 // session running resumeCmd if one doesn't already exist, then attaches.
 // This is used for local sessions without a live tmux pane, and mirrors the
 // remote fallback below for consistency.
-func newSessionAndAttachScript(web, resumeCmd string) string {
+func newSessionAndAttachScript(web, resumeCmd, cwd string) string {
 	webQ := shellutil.Quote(web)
 	resumeQ := shellutil.Quote(resumeCmd)
-	return "tmux has-session -t " + webQ + " 2>/dev/null || tmux new-session -d -s " + webQ + " " + resumeQ + "; " +
-		"exec tmux attach-session -t " + webQ
+	cFlag := ""
+	attachCFlag := ""
+	if cwd != "" {
+		cwdQ := shellutil.Quote(cwd)
+		cFlag = " -c " + cwdQ
+		attachCFlag = " -c " + cwdQ
+	}
+	return "tmux has-session -t " + webQ + " 2>/dev/null || tmux new-session -d -s " + webQ + cFlag + " " + resumeQ + "; " +
+		"exec tmux attach-session" + attachCFlag + " -t " + webQ
 }
 
 // localResumeCommand returns the resume command for a local session with no
@@ -177,18 +195,30 @@ func remoteNoTargetScript(web string, s sessions.Session) string {
 	resolver := shellutil.CopilotResolverCommand()
 	resumeQ := shellutil.Quote(`exec "$copilot_bin" --resume=` + shellutil.Quote(s.ID))
 
+	cFlag := ""
+	attachCFlag := ""
+	if s.CWD != "" {
+		cwdQ := shellutil.Quote(s.CWD)
+		cFlag = " -c " + cwdQ
+		attachCFlag = " -c " + cwdQ
+	}
+
 	return "if ! tmux has-session -t " + webQ + " 2>/dev/null; then " + resolver +
-		"tmux new-session -d -s " + webQ +
+		"tmux new-session -d -s " + webQ + cFlag +
 		` -e TSESSION_COPILOT_BIN="$copilot_bin" ` + resumeQ +
 		" || { tmux has-session -t " + webQ + " 2>/dev/null || exit $?; }" +
-		"; fi; exec tmux attach-session -t " + webQ
+		"; fi; exec tmux attach-session" + attachCFlag + " -t " + webQ
 }
 
 // remoteDirectResumeCommand returns the resume command for a remote host
 // with no tmux at all: no grouping is possible, so the resume command runs
 // directly.
 func remoteDirectResumeCommand(s sessions.Session) string {
-	return shellutil.CopilotResolverCommand() + `exec "$copilot_bin" --resume=` + shellutil.Quote(s.ID)
+	cdCmd := ""
+	if s.CWD != "" {
+		cdCmd = "cd " + shellutil.Quote(s.CWD) + " 2>/dev/null || true; "
+	}
+	return cdCmd + shellutil.CopilotResolverCommand() + `exec "$copilot_bin" --resume=` + shellutil.Quote(s.ID)
 }
 
 // splitTarget splits a tmux target of the form "session:window.pane" (as

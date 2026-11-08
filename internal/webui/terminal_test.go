@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/yarma/tsession/internal/attachcmd"
 	"github.com/yarma/tsession/internal/config"
 	"github.com/yarma/tsession/internal/sessions"
 	"github.com/yarma/tsession/internal/webterm"
@@ -268,3 +269,75 @@ func TestHandleTerminal_LogsSSHCommandForRemoteSession(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleTerminal_LocalSetsDirFromSessionCWD(t *testing.T) {
+	registry := webterm.NewRegistry()
+	t.Cleanup(func() { _ = registry.Shutdown() })
+
+	testDir := t.TempDir()
+	all := []sessions.Session{{ID: "s1", CWD: testDir}}
+	srv := NewServer(
+		func() ([]sessions.Session, error) { return all, nil },
+		WithTerminal(registry),
+	)
+
+	conn := dialTerminal(t, srv, "/api/terminal/local/s1")
+	defer conn.CloseNow()
+
+	key := webterm.Key{Origin: "", ID: "s1"}
+	term, ok := registry.Get(key)
+	if !ok {
+		t.Fatal("expected terminal to be registered")
+	}
+	if term.Dir() != testDir {
+		t.Fatalf("term.Dir() = %q, want %q", term.Dir(), testDir)
+	}
+}
+
+func TestHandleTerminal_ActivateUpdatesSessionWorkingDirectory(t *testing.T) {
+	registry := webterm.NewRegistry()
+	t.Cleanup(func() { _ = registry.Shutdown() })
+
+	testDir := t.TempDir()
+	all := []sessions.Session{{ID: "s1", CWD: testDir}}
+	srv := NewServer(
+		func() ([]sessions.Session, error) { return all, nil },
+		WithTerminal(registry),
+	)
+
+	var activatedWeb, activatedCwd string
+	srv.SetSessionActivate(func(web, cwd string) error {
+		activatedWeb = web
+		activatedCwd = cwd
+		return nil
+	})
+
+	conn := dialTerminal(t, srv, "/api/terminal/local/s1")
+	defer conn.CloseNow()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Send activate message
+	msg := `{"type":"activate"}`
+	if err := conn.Write(ctx, websocket.MessageText, []byte(msg)); err != nil {
+		t.Fatalf("write activate: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if activatedWeb != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	wantWeb := attachcmd.WebSessionName("", "s1")
+	if activatedWeb != wantWeb {
+		t.Fatalf("activatedWeb = %q, want %q", activatedWeb, wantWeb)
+	}
+	if activatedCwd != testDir {
+		t.Fatalf("activatedCwd = %q, want %q", activatedCwd, testDir)
+	}
+}
+

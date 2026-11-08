@@ -100,14 +100,41 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		term, err = s.registry.Attach(key, webterm.Spec{Bin: bin, Args: args, Rows: 24, Cols: 80, Teardown: teardown})
+		var dir string
+		if origin == "" {
+			dir = target.CWD
+		}
+
+		term, err = s.registry.Attach(key, webterm.Spec{
+			Bin:      bin,
+			Args:     args,
+			Dir:      dir,
+			Rows:     24,
+			Cols:     80,
+			Teardown: teardown,
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
 
-	s.bridgeTerminal(w, r, term, nil)
+	var onActivate func()
+	if origin == "" && s.sessionActivateFn != nil {
+		cwd := term.Dir()
+		if cwd != "" {
+			web := attachcmd.WebSessionName("", id)
+			onActivate = func() {
+				_ = s.sessionActivateFn(web, cwd)
+			}
+		}
+	}
+
+	s.bridgeTerminal(w, r, term, onActivate)
+}
+
+func defaultSessionActivate(web, cwd string) error {
+	return exec.Command("tmux", "attach-session", "-t", web, "-c", cwd).Run()
 }
 
 // bridgeTerminal upgrades the request to a WebSocket and pumps bytes

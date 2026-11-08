@@ -44,7 +44,7 @@ func BuildLocal(home string) (string, []string, error) {
 	ensure := "tmux has-session -t " + nameQ + " 2>/dev/null || " +
 		"tmux new-session -d -s " + nameQ + " -c " + shellutil.Quote(home) + "; "
 
-	grouped, err := groupedAttachScript(LocalWebSessionName(), LocalSessionName)
+	grouped, err := groupedAttachScript(LocalWebSessionName(), LocalSessionName, home)
 	if err != nil {
 		return "", nil, err
 	}

@@ -40,6 +40,10 @@ type Spec struct {
 	Bin  string
 	Args []string
 
+	// Dir sets the working directory for the command. If empty, the
+	// process inherits the working directory of the caller.
+	Dir string
+
 	// Rows and Cols set the initial PTY size. Zero values default to 24x80.
 	Rows uint16
 	Cols uint16
@@ -60,6 +64,7 @@ type Spec struct {
 type Terminal struct {
 	key  Key
 	cmd  *exec.Cmd
+	dir  string
 	ptmx *os.File
 
 	ring *ringBuffer
@@ -194,6 +199,9 @@ func newTerminal(key Key, spec Spec) (*Terminal, error) {
 
 	cmd := exec.Command(spec.Bin, spec.Args...)
 	cmd.Env = terminalEnv()
+	if spec.Dir != "" {
+		cmd.Dir = spec.Dir
+	}
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
 		return nil, fmt.Errorf("webterm: start %s: %w", spec.Bin, err)
@@ -202,6 +210,7 @@ func newTerminal(key Key, spec Spec) (*Terminal, error) {
 	t := &Terminal{
 		key:      key,
 		cmd:      cmd,
+		dir:      spec.Dir,
 		ptmx:     ptmx,
 		ring:     newRingBuffer(ringBufferCapacity),
 		subs:     make(map[*subscriber]struct{}),
@@ -302,6 +311,11 @@ func (t *Terminal) ProcessPID() int {
 		return 0
 	}
 	return t.cmd.Process.Pid
+}
+
+// Dir returns the working directory configured for this terminal.
+func (t *Terminal) Dir() string {
+	return t.dir
 }
 
 // Resize sets the PTY's window size.

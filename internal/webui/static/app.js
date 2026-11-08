@@ -685,8 +685,7 @@
   }
 
   function sendActivate(pane) {
-    if (pane.key !== sessionKey(LOCAL_TERMINAL)) return;
-    if (!pane.socket || pane.socket.readyState !== WebSocket.OPEN) return;
+    if (!pane || !pane.socket || pane.socket.readyState !== WebSocket.OPEN) return;
     pane.socket.send(JSON.stringify({ type: "activate" }));
   }
 

@@ -42,8 +42,8 @@ func TestBuildLocal_EnsuresPersistentSessionThenGroupedAttach(t *testing.T) {
 	// persistent session necessarily exists before it is mirrored.
 	for _, want := range []string{
 		"tmux has-session -t " + shQ(web),
-		"tmux new-session -d -s " + shQ(web) + " -t " + shQ(LocalSessionName),
-		"exec tmux attach-session -t " + shQ(web),
+		"tmux new-session -d -s " + shQ(web) + " -t " + shQ(LocalSessionName) + " -c " + shQ("/Users/someone"),
+		"exec tmux attach-session -c " + shQ("/Users/someone") + " -t " + shQ(web),
 	} {
 		if !strings.Contains(strings.TrimPrefix(script, ensure), want) {
 			t.Errorf("grouped attach missing %q:\n%s", want, script)

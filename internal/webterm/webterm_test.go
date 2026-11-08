@@ -77,6 +77,38 @@ func TestRegistry_AttachStartsAndReusesTerminal(t *testing.T) {
 	}
 }
 
+func TestTerminal_Dir(t *testing.T) {
+	reg := NewRegistry()
+	key := Key{Origin: "", ID: "dir-test"}
+	tempDir := t.TempDir()
+	spec := Spec{
+		Bin:  "sh",
+		Args: []string{"-c", "pwd; sleep 5"},
+		Dir:  tempDir,
+	}
+
+	term, err := reg.Attach(key, spec)
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	defer reg.Close(key)
+
+	if term.Dir() != tempDir {
+		t.Fatalf("Dir() = %q, want %q", term.Dir(), tempDir)
+	}
+
+	var out syncBuffer
+	unsub, err := term.Subscribe(&out)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer unsub()
+
+	waitFor(t, 3*time.Second, func() bool {
+		return strings.Contains(out.String(), tempDir)
+	})
+}
+
 func TestTerminal_RingBufferReplaysOnLateSubscribe(t *testing.T) {
 	reg := NewRegistry()
 	key := Key{Origin: "", ID: "s2"}
